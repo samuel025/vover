@@ -34,7 +34,9 @@
       <div class="badge" id="badge" hidden><i></i><span id="badgeText">REC</span></div>
     </div>
 
-    <div class="times"><span id="cur">0:00.0</span><span id="takeLen" class="sub"></span><span id="dur">0:00.0</span></div>
+    <div class="times"><span id="cur">0:00.0</span>
+      <span class="tzoom"><button id="tzOut" class="btn sm icon" title="Zoom the timeline out (-)">−</button><span id="tzLevel" class="sub">Fit</span><button id="tzIn" class="btn sm icon" title="Zoom the timeline in (+). Ctrl + scroll also zooms, double-click a clip to zoom to it">+</button><button id="tzFit" class="btn sm" title="Show the whole timeline (0)">Fit</button></span>
+      <span id="takeLen" class="sub"></span><span id="dur">0:00.0</span></div>
     <div class="timeline disabled" id="timeline">
       <div class="strip" id="strip"></div>
       <canvas id="wave"></canvas>
@@ -42,6 +44,7 @@
       <div class="cuts" id="cuts"></div>
       <div class="playhead" id="playhead"><b></b></div>
     </div>
+    <div class="tscroll" id="tscroll" hidden><i></i></div>
 
     <div class="clipbar">
       <button id="undo" class="btn sm" title="Undo (Ctrl+Z)" disabled>↶ Undo</button>
@@ -206,7 +209,7 @@
         <span><kbd>↑</kbd><kbd>↓</kbd> scroll speed</span><span><kbd>←</kbd><kbd>→</kbd> seek 5s</span>
         <span><kbd>[</kbd><kbd>]</kbd> section back · next</span><span><kbd>M</kbd> next section starts now</span>
         <span><kbd>S</kbd> retake this section</span><span><kbd>X</kbd> cut start · end</span>
-        <span><kbd>Esc</kbd> cancel a cut</span><span><kbd>B</kbd> split at playhead</span><span><kbd>L</kbd> redo this line</span>
+        <span><kbd>Esc</kbd> cancel a cut</span><span><kbd>B</kbd> split at playhead</span><span><kbd>+</kbd><kbd>−</kbd> zoom timeline · <kbd>0</kbd> fit</span><span><kbd>L</kbd> redo this line</span>
         <span><kbd>Del</kbd> delete clip</span><span><kbd>Ctrl</kbd><kbd>Z</kbd> undo · <kbd>Shift</kbd> redo</span>
       </div>
     </section>

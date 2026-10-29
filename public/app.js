@@ -125,7 +125,7 @@ function seekTo(g) {
 }
 function scrubAt(e) {
   const r = timeline.getBoundingClientRect();
-  seekTo(toSrc(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * editedLen()));
+  seekTo(toSrc(eAtX(e.clientX)));
 }
 let scrubbing = false;
 timeline.onpointerdown = (e) => { if (!canSeek()) return; scrubbing = true; timeline.setPointerCapture(e.pointerId); scrubAt(e); };
@@ -220,9 +220,57 @@ const gapsOf = () => { // parts of the videos that no clip uses (they were cut o
 // true when the export could be done by cutting the one video alone: no moving, no speed changes, no second video
 const plainEdit = () => sources.length === 1 && clips.every((c, i) => c.r === 1 && (i === 0 || c.a >= clips[i - 1].b - 1e-6));
 
+// ---------- timeline zoom ----------
+// The timeline can show just part of the edited video, so cuts and trims can be placed precisely.
+// view.len is how many seconds are visible (0 means all of it) and view.s is where the visible part starts.
+let view = { s: 0, len: 0 };
+function vr() {
+  const L = editedLen() || 1, len = view.len && view.len < L - 1e-6 ? Math.max(0.5, Math.min(L, view.len)) : L;
+  return { L, len, s: Math.max(0, Math.min(L - len, view.s)) };
+}
+const pctE = (e) => { const v = vr(); return ((e - v.s) / v.len) * 100; };
+const eAtX = (clientX, el = timeline) => { const r = el.getBoundingClientRect(), v = vr(); return v.s + Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * v.len; };
+function setView(s, len) { view = { s, len }; renderCuts(); updateScroll(); }
+function zoomBy(factor, anchor) {
+  const v = vr(), len = Math.min(v.L, Math.max(0.5, v.len / factor));
+  const a = anchor ?? (toEdit(gNow()) >= v.s && toEdit(gNow()) <= v.s + v.len ? toEdit(gNow()) : v.s + v.len / 2); // keep the playhead (or the middle) where it is
+  const rel = (a - v.s) / v.len;
+  setView(Math.max(0, a - rel * len), len >= v.L - 1e-6 ? 0 : len);
+}
+function updateScroll() {
+  const v = vr(), bar = $('tscroll'), zoomed = v.len < v.L - 1e-6;
+  bar.hidden = !zoomed;
+  $('tzLevel').textContent = zoomed ? (v.L / v.len).toFixed(v.L / v.len < 10 ? 1 : 0) + '×' : 'Fit';
+  if (zoomed) { const t = bar.firstElementChild; t.style.left = (v.s / v.L) * 100 + '%'; t.style.width = (v.len / v.L) * 100 + '%'; }
+}
+$('tzIn').onclick = () => zoomBy(1.6);
+$('tzOut').onclick = () => zoomBy(1 / 1.6);
+$('tzFit').onclick = () => setView(0, 0);
+timeline.addEventListener('wheel', (e) => {
+  if (!total()) return;
+  const v = vr();
+  if (e.ctrlKey || e.metaKey) { e.preventDefault(); zoomBy(e.deltaY < 0 ? 1.25 : 0.8, eAtX(e.clientX)); }
+  else if (v.len < v.L - 1e-6) { e.preventDefault(); setView(v.s + ((e.deltaX || e.deltaY) / timeline.clientWidth) * v.len, v.len); } // scroll along the zoomed timeline
+}, { passive: false });
+// the bar under the timeline shows which part is visible; drag it to scroll, click it to jump
+let barDrag = null;
+$('tscroll').onpointerdown = (e) => {
+  const v = vr(), r = $('tscroll').getBoundingClientRect(), t = (e.clientX - r.left) / r.width * v.L;
+  $('tscroll').setPointerCapture(e.pointerId);
+  const onThumb = t >= v.s && t <= v.s + v.len;
+  barDrag = { dx: onThumb ? t - v.s : v.len / 2 };
+  setView(Math.max(0, Math.min(v.L - v.len, t - barDrag.dx)), v.len);
+};
+$('tscroll').onpointermove = (e) => {
+  if (!barDrag) return;
+  const v = vr(), r = $('tscroll').getBoundingClientRect(), t = (e.clientX - r.left) / r.width * v.L;
+  setView(Math.max(0, Math.min(v.L - v.len, t - barDrag.dx)), v.len);
+};
+$('tscroll').onpointerup = $('tscroll').onpointercancel = () => { barDrag = null; };
+
 function newProject() {
   discardTake();
-  sources = []; clips = []; zooms = []; zsel = null; pick = null; loaded = -1; takes = []; cutStart = null; history = []; future = []; touched();
+  view = { s: 0, len: 0 }; sources = []; clips = []; zooms = []; zsel = null; pick = null; loaded = -1; takes = []; cutStart = null; history = []; future = []; touched();
   try { localStorage.removeItem('project'); localStorage.removeItem('marks'); } catch {}
   kv.get('sources').then((m) => { for (const x of m || []) kv.del('src-' + x.id); kv.del('video'); }).then(() => kv.del('takes'));
 }
@@ -320,18 +368,18 @@ function removeSpan(a, b) {
 
 const SRC_TINT = ['', 's1', 's2', 's3'];
 function renderCuts() {
-  const L = editedLen() || 1, list = segs(), k = curIdx();
+  const v = vr(), list = segs(), k = curIdx(), pct = (e) => ((e - v.s) / v.len) * 100;
   $('strip').innerHTML = list.map((s, i) => {
-    const w = ((s.b - s.a) / s.r / L) * 100;
+    const w = ((s.b - s.a) / s.r / v.len) * 100;
     const label = `${i + 1}${s.r !== 1 ? ` · ${s.r}×` : ''}${sources.length > 1 ? ` · ${esc(sources[s.src].name)}` : ''}`;
-    return `<div class="blk ${SRC_TINT[s.src % 4]}${i === k ? ' sel' : ''}" data-i="${i}" style="left:${(s.e0 / L) * 100}%;width:${w}%" title="${esc(sources[s.src]?.name || '')}"><span>${label}</span></div>`;
+    return `<div class="blk ${SRC_TINT[s.src % 4]}${i === k ? ' sel' : ''}" data-i="${i}" style="left:${pct(s.e0)}%;width:${w}%" title="${esc(sources[s.src]?.name || '')}"><span>${label}</span></div>`;
   }).join('');
   // a dot where a clip was split in two, a red line where something was cut out or clips from different places meet
   $('cuts').innerHTML = list.slice(1).map((s, i) => {
     const prev = list[i], joined = Math.abs(prev.b - s.a) < 1e-3 && prev.src === s.src && prev.r === s.r;
-    return `<i class="${joined ? 'split' : ''}" style="left:${(s.e0 / L) * 100}%"></i>`;
-  }).join('') + (cutStart === null ? '' : `<i class="pending" style="left:${(toEdit(cutStart) / L) * 100}%"></i>`)
-    + zooms.map((z) => `<b class="zm${z === zsel ? ' sel' : ''}" style="left:${(toEdit(z.a) / L) * 100}%;width:${Math.max(0.5, ((toEdit(z.b) - toEdit(z.a)) / L) * 100)}%">🔍 ${z.k.toFixed(1)}×</b>`).join('');
+    return `<i class="${joined ? 'split' : ''}" style="left:${pct(s.e0)}%"></i>`;
+  }).join('') + (cutStart === null ? '' : `<i class="pending" style="left:${pct(toEdit(cutStart))}%"></i>`)
+    + zooms.map((z) => `<b class="zm${z === zsel ? ' sel' : ''}" style="left:${pct(toEdit(z.a))}%;width:${Math.max(0.5, ((toEdit(z.b) - toEdit(z.a)) / v.len) * 100)}%">🔍 ${z.k.toFixed(1)}×</b>`).join('');
   $('dur').textContent = fmt(editedLen());
   const gaps = gapsOf(), bar = $('cutbar');
   bar.hidden = !gaps.length && cutStart === null;
@@ -340,7 +388,7 @@ function renderCuts() {
     : gaps.map((g, i) => `<span>✂ ${(g.b - g.a).toFixed(1)}s removed</span><button class="btn ghost" data-restore="${i}">Restore</button>`).join(''))
     + (gaps.length ? `<span class="sub">Edited length ${fmt(editedLen())}</span>` : '');
   lastClipKey = '';
-  drawWave(); renderMarks(); updateUI();
+  drawWave(); renderMarks(); updateScroll(); updateUI();
 }
 $('cutbar').onclick = (e) => {
   const i = e.target.dataset?.restore;
@@ -445,7 +493,7 @@ strip.onpointerdown = (e) => {
   const i = +blk.dataset.i, c = clips[i], W = strip.getBoundingClientRect().width;
   const si = srcOf((c.a + c.b) / 2), joined = (o, j, side) => j !== i && srcOf((o.a + o.b) / 2) === si && Math.abs(side === 'r' ? o.a - c.b : o.b - c.a) < 1e-3;
   // a clip that was split from this one shares the edge, so it moves along with it (found now: it moves while dragging)
-  sdrag = { i, c0: { ...c }, edge: edgeAt(blk, e.clientX), x0: e.clientX, perPx: editedLen() / W, moved: false, saved: false, to: i,
+  sdrag = { i, c0: { ...c }, edge: edgeAt(blk, e.clientX), x0: e.clientX, perPx: vr().len / W, moved: false, saved: false, to: i,
     pr: clips.findIndex((o, j) => joined(o, j, 'r')), pl: clips.findIndex((o, j) => joined(o, j, 'l')) };
 };
 strip.onpointermove = (e) => {
@@ -463,11 +511,17 @@ strip.onpointerup = strip.onpointercancel = (e) => {
   strip.querySelector('.drop')?.remove();
   if (!d.moved) { // a plain click puts the playhead there
     const r = strip.getBoundingClientRect();
-    return seekTo(toSrc(((e.clientX - r.left) / r.width) * editedLen()));
+    return seekTo(toSrc(eAtX(e.clientX, strip)));
   }
   if (d.edge) { commitEdit(); return; }
   if (d.to !== d.i) { const [c] = clips.splice(d.i, 1); clips.splice(d.to, 0, c); commitEdit(); status(`Moved the clip to position ${d.to + 1}.`); }
   else renderCuts();
+};
+strip.ondblclick = (e) => {
+  const blk = document.elementsFromPoint(e.clientX, e.clientY).find((el) => el.classList?.contains('blk')); // the strip holds the pointer, so look at what is under it
+  if (!blk) return;
+  const s = segs()[+blk.dataset.i], len = Math.max(0.5, ((s.b - s.a) / s.r) * 1.2);
+  setView(Math.max(0, s.e0 - len * 0.083), len);
 };
 // dragging an edge: a clip grows or shrinks, and a clip joined to it (a split) moves with it
 function trimEdge(d, dg) {
@@ -490,7 +544,7 @@ function trimEdge(d, dg) {
 }
 // dragging a clip: shows where it would land
 function moveHint(e) {
-  const r = strip.getBoundingClientRect(), L = editedLen(), x = ((e.clientX - r.left) / r.width) * L;
+  const x = eAtX(e.clientX, strip);
   const list = segs();
   let to = 0;
   list.forEach((s, j) => { if (j !== sdrag.i && s.e0 + (s.b - s.a) / s.r / 2 < x) to++; });
@@ -500,7 +554,7 @@ function moveHint(e) {
   const rest = list.filter((_, j) => j !== sdrag.i);
   const at = to === 0 ? 0 : (rest[to - 1].e0 + (rest[to - 1].b - rest[to - 1].a) / rest[to - 1].r);
   const line = Object.assign(document.createElement('div'), { className: 'drop' });
-  line.style.left = (at / L) * 100 + '%';
+  line.style.left = pctE(at) + '%';
   strip.append(line);
 }
 
@@ -689,26 +743,39 @@ $('srt').onclick = () => {
   status('Captions downloaded. Their timing follows your section start times, so use "Fit to my voice" for the best match.');
 };
 
+const RULER_STEPS = [0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
+function tlabel(t, step) { const m = Math.floor(t / 60), sec = t - m * 60; return `${m}:${sec.toFixed(step < 0.1 ? 2 : step < 1 ? 1 : 0).padStart(step < 0.1 ? 5 : step < 1 ? 4 : 2, '0')}`; }
 function drawWave() {
   const dpr = devicePixelRatio || 1;
   canvas.width = canvas.clientWidth * dpr;
   canvas.height = canvas.clientHeight * dpr;
   const g = canvas.getContext('2d'), W = canvas.width, H = canvas.height;
   g.clearRect(0, 0, W, H);
-  const L = editedLen();
-  if (!L || !ctx && !peaks.length) return;
-  const rate = state.take?.rate || ctx?.sampleRate || 48000;
-  const perPx = L / W; // seconds of edited video per pixel
-  g.fillStyle = '#ffb88e26';
-  g.fillRect(0, 0, Math.min(W, (toEdit(Math.min(total(), (peaks.length * B) / rate)) / L) * W), H);
-  g.fillStyle = '#f08a4b';
-  for (let x = 0; x < W; x++) {
-    const s0 = toSrc(x * perPx), b0 = Math.floor((s0 * rate) / B), b1 = Math.max(b0 + 1, Math.floor(((s0 + perPx) * rate) / B));
-    if (b0 >= peaks.length) break;
-    let mx = 0;
-    for (let b = b0; b < b1 && b < peaks.length; b++) mx = Math.max(mx, peaks[b]);
-    const h = Math.max(2 * dpr, Math.min(1, mx * 1.6) * H * 0.9);
-    g.fillRect(x, (H - h) / 2, 1, h);
+  const v = vr();
+  if (!editedLen() || !W) return;
+  const perPx = v.len / W; // seconds of edited video per pixel
+  if (ctx || peaks.length) {
+    const rate = state.take?.rate || ctx?.sampleRate || 48000;
+    g.fillStyle = '#ffb88e26';
+    const end = ((toEdit(Math.min(total(), (peaks.length * B) / rate)) - v.s) / v.len) * W;
+    g.fillRect(0, 0, Math.max(0, Math.min(W, end)), H);
+    g.fillStyle = '#f08a4b';
+    for (let x = 0; x < W; x++) {
+      const e = v.s + x * perPx, s0 = toSrc(e), r = speedAt(s0), b0 = Math.floor((s0 * rate) / B), b1 = Math.max(b0 + 1, Math.floor(((s0 + perPx * r) * rate) / B));
+      if (b0 >= peaks.length) break;
+      let mx = 0;
+      for (let b = b0; b < b1 && b < peaks.length; b++) mx = Math.max(mx, peaks[b]);
+      const h = Math.max(2 * dpr, Math.min(1, mx * 1.6) * H * 0.9);
+      g.fillRect(x, (H - h) / 2, 1, h);
+    }
+  }
+  // time ruler along the bottom: marks every so often, with the interval chosen to suit the zoom
+  const step = RULER_STEPS.find((q) => (q / perPx) / dpr >= 80) || 600;
+  g.fillStyle = '#737373'; g.strokeStyle = '#00000026'; g.font = `${10 * dpr}px Inter, sans-serif`; g.textBaseline = 'bottom';
+  for (let t = Math.ceil(v.s / step) * step; t < v.s + v.len; t += step) {
+    const x = Math.round((t - v.s) / perPx);
+    g.beginPath(); g.moveTo(x + 0.5, H - 14 * dpr); g.lineTo(x + 0.5, H); g.stroke();
+    g.fillText(tlabel(t, step), x + 3 * dpr, H - 2 * dpr);
   }
 }
 addEventListener('resize', drawWave);
@@ -784,7 +851,7 @@ function updateWpm() {
 
 function renderMarks() {
   const d = editedLen();
-  $('marks').replaceChildren(...(d ? sections.slice(1).map((x, i) => Object.assign(document.createElement('i'), { style: `left:${(toEdit(x.start) / d) * 100}%`, title: `Section ${i + 2}` })) : []));
+  $('marks').replaceChildren(...(d ? sections.slice(1).map((x, i) => Object.assign(document.createElement('i'), { style: `left:${pctE(toEdit(x.start))}%`, title: `Section ${i + 2}` })) : []));
   [...$('marks').children].forEach((m, i) => (m.dataset.n = i + 2));
 }
 function renderSections() {
@@ -901,7 +968,13 @@ video.onended = () => { if (state.playing || (state.recording && !state.recPause
 
 function tick() {
   const t = gNow();
-  if (total()) $('playhead').style.left = (editedLen() ? (toEdit(t) / editedLen()) * 100 : 0) + '%';
+  if (total()) {
+    const e = toEdit(t), v = vr(), x = pctE(e);
+    $('playhead').style.display = x < -0.3 || x > 100.3 ? 'none' : '';
+    $('playhead').style.left = x + '%';
+    // while playing or recording a zoomed timeline follows the playhead
+    if ((state.playing || state.recording) && v.len < v.L - 1e-6 && !scrubbing && (e > v.s + v.len * 0.97 || e < v.s)) setView(Math.max(0, e - v.len * 0.1), v.len);
+  }
   $('cur').textContent = fmt(toEdit(t));
   if (!state.recording) updateRecLabel();
   // a section retake stops by itself at the end of its section
@@ -1482,6 +1555,9 @@ document.addEventListener('keydown', (e) => {
   else if (k === 'x') cutPress();
   else if (k === 'l') redoLine();
   else if (k === 'b') splitHere();
+  else if (k === '+' || k === '=') zoomBy(1.6);
+  else if (k === '-' || k === '_') zoomBy(1 / 1.6);
+  else if (k === '0') setView(0, 0);
   else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteClip(); }
   else if (e.key === 'Escape') cancelCut();
   else if (k === 'f') toggleFullscreen();
