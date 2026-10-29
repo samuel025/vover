@@ -180,3 +180,37 @@ kbd{font:500 11px Inter;border:1px solid var(--border);border-bottom-width:2px;b
 .zdot{position:absolute;width:18px;height:18px;margin:-9px 0 0 -9px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 0 1px #0007;pointer-events:none;z-index:3}
 .zdot.a{background:#4f7bff}.zdot.b{background:#e5484d}
 .video-wrap.picking{cursor:crosshair}
+
+/* ---------- app layout: the studio fills the window and only the side panel scrolls ---------- */
+body.app{height:100vh;overflow:hidden;display:flex;flex-direction:column}
+body.app .bar{position:static;flex:none;padding:8px 20px}
+body.app .layout{flex:1;min-height:0;max-width:none;width:100%;margin:0;padding:12px 16px;gap:12px;grid-template-columns:minmax(0,1fr) 400px;align-items:stretch}
+body.app .stage{min-height:0;align-self:stretch;padding:12px;gap:8px;overflow:hidden}
+body.app .video-wrap{flex:1 1 0;min-height:120px;aspect-ratio:auto;max-height:none;width:100%}
+body.app .video-wrap.shape-vertical{flex:1 1 0;aspect-ratio:9/16;width:auto;max-width:100%;min-height:0;align-self:center}
+body.app .video-wrap.shape-square{flex:1 1 0;aspect-ratio:1;width:auto;max-width:100%;min-height:0;align-self:center}
+body.app .stage>*:not(.video-wrap){flex:none}
+.side{display:flex;flex-direction:column;min-height:0;overflow:hidden;padding:0}
+.tabs{display:flex;gap:2px;padding:8px 10px;border-bottom:1px solid var(--border);flex:none}
+.tabs button{flex:1;border:0;background:transparent;padding:6px 4px;border-radius:999px;font:500 13px Inter;color:var(--sub);cursor:pointer}
+.tabs button:hover{background:var(--hover)}
+.tabs button.on{background:var(--text);color:#fff}
+.panels{flex:1;min-height:0;position:relative}
+.panel{position:absolute;inset:0;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:18px}
+.panel[hidden]{display:none}
+.panel .card{border:0;box-shadow:none;background:none;border-radius:0;padding:0}
+.panel .opts+.opts{border-top:1px solid var(--border);padding-top:18px}
+.panel[data-panel=script]{overflow:hidden}
+.panel[data-panel=script] .prompter-card{flex:1;min-height:0}
+.prompter-card textarea,.prompter-card .prompter,.prompter-card .sections{flex:1;height:auto;min-height:120px;resize:none}
+.textopts{display:flex;flex-direction:column;gap:8px;padding-top:4px;flex:none}
+@media(max-width:1000px){
+  body.app{height:auto;overflow:auto;display:block}
+  body.app .layout{display:block}
+  body.app .stage{overflow:visible;margin-bottom:12px}
+  body.app .video-wrap{aspect-ratio:16/9;min-height:240px}
+  .side{overflow:visible}.panels{position:static}.panel{position:static;overflow:visible}
+  .panel[data-panel=script]{overflow:visible}.prompter-card textarea,.prompter-card .prompter,.prompter-card .sections{height:320px;flex:none}
+}
+.panel h2{margin:0}
+.panel .prompter-card{gap:10px}

@@ -832,7 +832,15 @@ function fitToVoice() {
   marksChanged('Sections lined up with the pauses in your voice.');
 }
 
+// the side panel shows one group of controls at a time, so nothing needs scrolling past
+function setPanel(name) {
+  for (const b of document.querySelectorAll('#panelTabs button')) b.classList.toggle('on', b.dataset.p === name);
+  for (const el of document.querySelectorAll('.panel')) el.hidden = el.dataset.panel !== name;
+  try { localStorage.setItem('panel', name); } catch {}
+}
+$('panelTabs').onclick = (e) => { const b = e.target.closest('button'); if (b) setPanel(b.dataset.p); };
 function setTab(tab) {
+  setPanel('script');
   const tabs = { edit: ['tabEdit', scriptEl], read: ['tabRead', prompter], sections: ['tabSections', secEl] };
   for (const [k, [btn, el]] of Object.entries(tabs)) { $(btn).classList.toggle('on', k === tab); el.hidden = k !== tab; }
   if (tab !== 'edit') layoutWords();

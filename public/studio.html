@@ -8,7 +8,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="style.css" />
 </head>
-<body>
+<body class="app">
 <header class="bar">
   <a class="brand" href="/"><span class="dot"></span>Voiceover Studio</a>
   <div class="bar-actions">
@@ -89,7 +89,16 @@
     <div class="status" id="status">Upload a video to begin</div>
   </section>
 
-  <aside class="side">
+  <aside class="side card">
+    <nav class="tabs" id="panelTabs">
+      <button data-p="script" class="on">Script</button>
+      <button data-p="takes">Takes</button>
+      <button data-p="audio">Audio</button>
+      <button data-p="picture">Picture</button>
+      <button data-p="help">Keys</button>
+    </nav>
+    <div class="panels">
+      <div class="panel" data-panel="script">
     <section class="card prompter-card">
       <div class="card-head">
         <h2>Script</h2>
@@ -117,25 +126,28 @@
         <b id="speedLabel">1.00×</b>
       </div>
       <small class="sub" id="wpm"></small>
+      <div class="textopts">
+        <label class="row">Text size <input id="fs" type="range" min="20" max="64" value="34" /></label>
+        <label class="row check"><input id="mirror" type="checkbox" /> Mirror text</label>
+      </div>
     </section>
-
+      </div>
+      <div class="panel" data-panel="takes" hidden>
     <section class="card opts">
-      <h2>Options</h2>
-      <label class="row">Font size <input id="fs" type="range" min="20" max="64" value="34" /></label>
+      <h2>Takes</h2>
+      <div id="takes" class="takes"></div>
+    </section>
+      </div>
+      <div class="panel" data-panel="audio" hidden>
+    <section class="card opts">
+      <h2>Recording &amp; sound</h2>
       <label class="row">Voice volume <input id="vol" type="range" min="0" max="200" value="100" /></label>
       <label class="row">Sync nudge <span><input id="nudge" type="number" step="10" value="0" /> ms</span></label>
-      <label class="row check"><input id="mirror" type="checkbox" /> Mirror text</label>
       <label class="row check"><input id="keep" type="checkbox" /> Keep original as quiet background in export</label>
       <label class="row">Mic <select id="mic"></select></label>
       <div class="meter"><i id="level"></i></div>
       <small id="levelHint" class="sub"></small>
     </section>
-
-    <section class="card opts">
-      <h2>Takes</h2>
-      <div id="takes" class="takes"></div>
-    </section>
-
     <section class="card opts">
       <h2>Audio polish</h2>
       <label class="row check"><input id="denoise" type="checkbox" /> Reduce background noise</label>
@@ -162,7 +174,8 @@
       </div>
       <small class="sub" id="fxNote"></small>
     </section>
-
+      </div>
+      <div class="panel" data-panel="picture" hidden>
     <section class="card opts">
       <h2>Picture &amp; text</h2>
       <label class="row">Shape
@@ -177,14 +190,14 @@
       <label class="row">Outro length <select id="outroSec"><option value="0">None</option><option value="2">2 s</option><option value="3" selected>3 s</option><option value="4">4 s</option><option value="5">5 s</option></select></label>
       <small class="sub">Title cards are added when you export. Captions, cropping and speed changes need Chrome or Edge.</small>
     </section>
-
     <section class="card opts">
       <h2>Zoom &amp; pan</h2>
       <button id="zoomAdd" class="btn sm" disabled title="Zoom into part of the picture from the playhead">+ Add zoom at playhead</button>
       <div id="zoomList" class="zooms"></div>
       <small class="sub">Zooms are timed to the video, so they stay with it when you trim or move clips. They need Chrome or Edge to export.</small>
     </section>
-
+      </div>
+      <div class="panel" data-panel="help" hidden>
     <section class="card opts keys">
       <h2>Keyboard</h2>
       <div class="kgrid">
@@ -197,6 +210,8 @@
         <span><kbd>Del</kbd> delete clip</span><span><kbd>Ctrl</kbd><kbd>Z</kbd> undo · <kbd>Shift</kbd> redo</span>
       </div>
     </section>
+      </div>
+    </div>
   </aside>
 </main>
 <script src="app.js" type="module"></script>
