@@ -95,31 +95,38 @@ function updateRecLabel() {
 async function loadVideo(file, restored) {
   if (!file) return;
   stopAll();
-  if (!restored) { discardTake(); kv.set('video', { file }); cuts = []; splits = []; speeds = []; cutStart = null; history = []; future = []; touched(); try { localStorage.removeItem('edit'); } catch {} }
+  if (!restored) { discardTake(); cuts = []; splits = []; speeds = []; cutStart = null; history = []; future = []; touched(); try { localStorage.removeItem('edit'); } catch {} }
   state.file = file; state.serverId = null;
   video.src = URL.createObjectURL(file) + '#t=0.001'; // starting a hair in makes the browser paint the first frame instead of a blank player
   video.hidden = false;
   $('empty').hidden = true;
   navigator.storage?.persist?.();
+  updateUI(); // the studio is usable straight away; saving a big file for the next visit happens in the background
+  status(restored ? 'Welcome back. Your video, script and take were restored.' : 'Loading the video…');
   if (!restored && !(await kv.set('video', { file }))) status('Ready, but the browser would not save this video, so a refresh will clear it.');
-  else status(restored ? 'Welcome back. Your video, script and take were restored.' : 'Ready. Paste your script, then press Record.');
-  updateUI();
+  else if (!restored) status('Ready. Paste your script, then press Record.');
 }
+// a file the browser cannot play (some MKV or HEVC videos) would otherwise just sit there looking broken
+video.onerror = () => { if (state.file) status('This browser cannot play that video. Try an MP4 (H.264) or WebM file.'); };
 $('file').onchange = (e) => loadVideo(e.target.files[0]);
 
 const wrap = $('videoWrap');
-// listen on the whole window so a drop anywhere on the page is caught instead of the browser opening the file
-let dragDepth = 0;
-const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
-window.addEventListener('dragenter', (e) => { if (hasFiles(e)) { dragDepth++; wrap.classList.add('drag'); } });
-window.addEventListener('dragleave', (e) => { if (hasFiles(e) && --dragDepth <= 0) { dragDepth = 0; wrap.classList.remove('drag'); } });
-window.addEventListener('dragover', (e) => { if (hasFiles(e)) e.preventDefault(); });
-window.addEventListener('drop', (e) => {
-  if (!hasFiles(e)) return;
-  e.preventDefault(); dragDepth = 0; wrap.classList.remove('drag');
-  const f = [...e.dataTransfer.files].find((x) => x.type.startsWith('video/') || /\.(mp4|mov|webm|m4v|mkv)$/i.test(x.name));
+// The whole page accepts a dropped video. If a drop were ignored the browser would open the file in a new tab, so every
+// drag and drop is claimed here (except plain text going into the script box).
+const isFileDrag = (e) => [...(e.dataTransfer?.types || [])].some((t) => t === 'Files' || t === 'application/x-moz-file');
+const inText = (e) => /TEXTAREA|INPUT/.test(e.target?.tagName || '');
+let dragTimer = 0;
+const dragOn = () => { wrap.classList.add('drag'); clearTimeout(dragTimer); dragTimer = setTimeout(() => wrap.classList.remove('drag'), 150); }; // dragover repeats while hovering; stops = left
+const claim = (e) => { if (isFileDrag(e) || !inText(e)) { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'; return true; } return false; };
+for (const type of ['dragenter', 'dragover']) document.addEventListener(type, (e) => { if (claim(e) && isFileDrag(e)) dragOn(); }, true);
+document.addEventListener('drop', (e) => {
+  if (!claim(e)) return;
+  clearTimeout(dragTimer); wrap.classList.remove('drag');
+  const files = [...(e.dataTransfer?.files || [])];
+  if (!files.length) return;
+  const f = files.find((x) => x.type.startsWith('video/') || /\.(mp4|mov|webm|m4v|mkv|avi|ogv)$/i.test(x.name));
   if (f) loadVideo(f); else status('That file is not a video.');
-});
+}, true);
 
 video.onloadedmetadata = () => { loadEdit(); layoutWords(); drawWave(); };
 video.onended = () => { if (state.playing) stopPlay(); else if (state.recording && !state.recPaused) stopRecording(); };
