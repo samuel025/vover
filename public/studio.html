@@ -75,6 +75,9 @@
         <button id="cut" class="btn" title="Cut out part of the video: press at the start, move, press again at the end (X)" disabled>✂ Cut</button>
         <button id="trim" class="btn" title="Cut the take at the playhead (T)" disabled>Trim end here</button>
         <button id="clear" class="btn ghost" disabled>Discard take</button>
+        <button id="expAudio" class="btn ghost" title="Save your recording as an audio file" disabled>Save audio</button>
+        <label class="btn ghost" for="audioFile" title="Use a saved recording on this video">Import audio</label>
+        <input id="audioFile" type="file" accept="audio/*" hidden />
       </div>
     </div>
     <div class="notice" id="recover" hidden><span id="recoverText"></span><span><button id="recoverYes" class="btn sm">Recover</button><button id="recoverNo" class="btn sm ghost">Dismiss</button></span></div>

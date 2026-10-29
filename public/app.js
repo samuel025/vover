@@ -75,6 +75,7 @@ function updateUI() {
   $('srt').disabled = !v;
   $('cut').textContent = cutStart === null ? '✂ Cut' : '✂ Cut ends here';
   $('clear').disabled = rec || !hasTake();
+  $('expAudio').disabled = rec || !hasTake();
   $('export').disabled = rec || !(hasTake() || music) || gone;
   $('hear').disabled = rec;
   secEl.classList.toggle('busy', rec && !state.recPaused);
@@ -990,6 +991,40 @@ $('rate').onchange = (e) => {
   if (voiceSrc) voiceSrc.playbackRate.value = +e.target.value;
 };
 $('hear').onchange = () => { if (!state.recording) video.muted = !$('hear').checked; };
+
+// ---------- save and import the recording as audio ----------
+// The saved file is the recording as it lines up with the video (it starts at the video's 0:00), so importing it on
+// another video puts every word back where it was and you can carry on recording from there.
+function wav16({ samples, rate }) {
+  const b = new DataView(new ArrayBuffer(44 + samples.length * 2));
+  const w = (o, t) => [...t].forEach((c, i) => b.setUint8(o + i, c.charCodeAt(0)));
+  w(0, 'RIFF'); b.setUint32(4, 36 + samples.length * 2, true); w(8, 'WAVEfmt ');
+  b.setUint32(16, 16, true); b.setUint16(20, 1, true); b.setUint16(22, 1, true);
+  b.setUint32(24, rate, true); b.setUint32(28, rate * 2, true); b.setUint16(32, 2, true); b.setUint16(34, 16, true);
+  w(36, 'data'); b.setUint32(40, samples.length * 2, true);
+  for (let i = 0; i < samples.length; i++) b.setInt16(44 + i * 2, Math.max(-1, Math.min(1, samples[i])) * 0x7fff, true);
+  return new Blob([b], { type: 'audio/wav' });
+}
+$('expAudio').onclick = () => {
+  if (!hasTake()) return;
+  Object.assign(document.createElement('a'), { href: URL.createObjectURL(wav16(state.take)), download: 'voiceover-audio.wav' }).click();
+  status('Audio saved. Use Import audio on any video to put this recording back and carry on from it.');
+};
+$('audioFile').onchange = async (e) => {
+  const f = e.target.files[0]; e.target.value = '';
+  if (!f) return;
+  if (!state.file) return status('Add the video first, then import the audio onto it.');
+  if (state.recording && !state.recPaused) return status('Stop recording first.');
+  try {
+    const buf = await getCtx().decodeAudioData(await f.arrayBuffer()); // also converts it to this device's sample rate
+    const mono = new Float32Array(buf.length);
+    for (let c = 0; c < buf.numberOfChannels; c++) { const d = buf.getChannelData(c); for (let i = 0; i < mono.length; i++) mono[i] += d[i] / buf.numberOfChannels; }
+    stopPlay(); checkpoint();
+    state.take = { samples: mono, rate: buf.sampleRate }; state.attempts = {}; mixCache = null; cleaned = null;
+    rebuildPeaks(mono); saveTake(); saveAttempts(); touched(); drawWave(); renderSections(); updateUI();
+    status(`Imported ${f.name} (${fmt(buf.duration)}). Move the playhead and press Record to carry on from it. Undo brings back what was there.`);
+  } catch { status('Could not read that audio file.'); }
+};
 
 // ---------- export ----------
 function wav({ samples, rate }) {
