@@ -140,3 +140,6 @@ kbd{font:500 11px Inter;border:1px solid var(--border);border-bottom-width:2px;b
 .music{display:flex;flex-direction:column;gap:8px;align-items:flex-start}
 .music label.btn{cursor:pointer}
 .opts input[type=text]{width:60%;height:30px;border:1px solid var(--border);border-radius:8px;padding:0 8px;font:13px Inter}
+
+.video-wrap.gone video{opacity:.06}
+.video-wrap.gone::after{content:"Everything was deleted. Press Undo to bring it back.";position:absolute;color:#fff;font:500 14px Inter;text-align:center;padding:0 24px}

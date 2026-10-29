@@ -67,12 +67,15 @@ function updateUI() {
   $('trim').disabled = !idle || !hasTake();
   $('cut').disabled = !idle;
   $('undo').disabled = !idle || !history.length; $('redo').disabled = !idle || !future.length;
-  for (const k of ['split', 'delClip', 'clipSpeed']) $(k).disabled = !idle;
+  const gone = v && !!video.duration && editedLen() < 0.05; // every clip was deleted
+  for (const k of ['split', 'clipSpeed', 'delClip']) $(k).disabled = !idle || gone;
+  wrap.classList.toggle('gone', gone);
+  if (gone) for (const k of ['cut', 'rec', 'play', 'toStart', 'back', 'fwd']) $(k).disabled = true;
   $('pauses').disabled = !idle || !hasTake();
   $('srt').disabled = !v;
   $('cut').textContent = cutStart === null ? '✂ Cut' : '✂ Cut ends here';
   $('clear').disabled = rec || !hasTake();
-  $('export').disabled = rec || !(hasTake() || music);
+  $('export').disabled = rec || !(hasTake() || music) || gone;
   $('hear').disabled = rec;
   secEl.classList.toggle('busy', rec && !state.recPaused);
   timeline.classList.toggle('disabled', !v);
@@ -94,7 +97,7 @@ async function loadVideo(file, restored) {
   stopAll();
   if (!restored) { discardTake(); kv.set('video', { file }); cuts = []; splits = []; speeds = []; cutStart = null; history = []; future = []; touched(); try { localStorage.removeItem('edit'); } catch {} }
   state.file = file; state.serverId = null;
-  video.src = URL.createObjectURL(file);
+  video.src = URL.createObjectURL(file) + '#t=0.001'; // starting a hair in makes the browser paint the first frame instead of a blank player
   video.hidden = false;
   $('empty').hidden = true;
   navigator.storage?.persist?.();
@@ -309,8 +312,9 @@ function deleteClip() {
   if (!canSeek()) return;
   const c = clipAt(video.currentTime);
   if (!c) return;
-  if (editedLen() - (toEdit(c.b) - toEdit(c.a)) < 0.3) return status('That is all that is left of the video. Split it first to delete just part.');
+  const all = editedLen() - (toEdit(c.b) - toEdit(c.a)) < 0.05;
   checkpoint(); mergeCut(c.a, c.b); commitEdit();
+  if (all) { seekTo(0); return status('Everything was deleted. Press Undo (Ctrl+Z) to bring it back.'); }
   seekTo(c.b);
   status(`Deleted the clip (${(c.b - c.a).toFixed(1)}s).`);
 }
@@ -620,7 +624,7 @@ function showCount(n) {
 
 function tick() {
   const t = video.currentTime || 0;
-  if (video.duration) $('playhead').style.left = (toEdit(t) / editedLen()) * 100 + '%';
+  if (video.duration) $('playhead').style.left = (editedLen() ? (toEdit(t) / editedLen()) * 100 : 0) + '%';
   $('cur').textContent = fmt(toEdit(t));
   if (!state.recording) updateRecLabel();
   // a section retake stops by itself at the end of its section
