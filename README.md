@@ -13,6 +13,7 @@ Record a voiceover over any video in one browser tab. Upload a video, paste your
 - Voice tone presets (podcast, warm, bright) and a light or strong de-esser, applied to the recording non-destructively
 - New project clears everything and gives a blank workspace
 - Zoomable timeline with a time ruler: + / - buttons or keys, Ctrl + scroll, double-click a clip to zoom to it, scroll bar to move along, follows the playhead while playing
+- Video-only edits: set "Edits change" to "video only" and cuts, deletes, moves and speed changes leave your recorded voice exactly where it is on the timeline (switching back re-attaches it to the video)
 - A clip strip above the waveform: drag a clip's edge to trim it, drag a clip to move it, click to select it
 - Combine several videos on one timeline and narrate across them (+ Add video, or drop more videos on the page)
 - Takes: every finished recording is kept in a list you can listen to, star and switch between

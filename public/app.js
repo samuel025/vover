@@ -12,7 +12,7 @@ let base = new Float32Array(0), chunks = [], chunkLen = 0, capturing = false;
 let spans = [], lastNow = -1, lastSec = -1;
 let speed = 1;
 let capStart = 0, draft = null;
-let cutStart = null, editVer = 0, history = [], future = [], music = null, musicId = 0, takes = [], playK = -1, zooms = [], zsel = null, pick = null, zoomDirty = false;
+let cutStart = null, editVer = 0, history = [], future = [], music = null, musicId = 0, takes = [], playK = -1, voiceFree = false, zooms = [], zsel = null, pick = null, zoomDirty = false;
 let cleaned = null, cleaning = null, finalCache = {}, abCache = null, lastClipKey = '', lastCap = null;
 
 const B = 1024; // samples per waveform bucket
@@ -71,7 +71,8 @@ function updateUI() {
   for (const k of ['split', 'clipSpeed', 'delClip']) $(k).disabled = !idle || gone;
   wrap.classList.toggle('gone', gone);
   if (gone) for (const k of ['cut', 'rec', 'play', 'toStart', 'back', 'fwd']) $(k).disabled = true;
-  $('pauses').disabled = !idle || !hasTake();
+  $('pauses').disabled = !idle || !hasTake() || voiceFree;
+  $('pauses').title = voiceFree ? 'Switch "Edits change" to video and voice to cut out pauses' : 'Cuts long silences out of the recording and the video';
   $('zoomAdd').disabled = !idle;
   $('srt').disabled = !v;
   $('cut').textContent = cutStart === null ? '✂ Cut' : '✂ Cut ends here';
@@ -85,7 +86,7 @@ function updateUI() {
   $('badge').classList.toggle('paused', state.recPaused);
   $('badgeText').textContent = state.recPaused ? 'PAUSED' : 'REC';
   updateRecLabel();
-  $('takeLen').textContent = hasTake() ? `voice ${fmt(toEdit(state.take.samples.length / state.take.rate))}` : '';
+  $('takeLen').textContent = hasTake() ? `voice ${fmt(voiceFree ? voiceSec() : toEdit(voiceSec()))}` : '';
 }
 function updateRecLabel() {
   const t = gNow();
@@ -270,7 +271,7 @@ $('tscroll').onpointerup = $('tscroll').onpointercancel = () => { barDrag = null
 
 function newProject() {
   discardTake();
-  view = { s: 0, len: 0 }; sources = []; clips = []; zooms = []; zsel = null; pick = null; loaded = -1; takes = []; cutStart = null; history = []; future = []; touched();
+  view = { s: 0, len: 0 }; voiceFree = false; $('editMode').value = 'both'; sources = []; clips = []; zooms = []; zsel = null; pick = null; loaded = -1; takes = []; cutStart = null; history = []; future = []; touched();
   try { localStorage.removeItem('project'); localStorage.removeItem('marks'); } catch {}
   kv.get('sources').then((m) => { for (const x of m || []) kv.del('src-' + x.id); kv.del('video'); }).then(() => kv.del('takes'));
 }
@@ -281,7 +282,7 @@ async function addSource(file, id) {
   return s;
 }
 const saveSources = () => kv.set('sources', sources.map(({ id, name, dur }) => ({ id, name, dur })));
-function saveProject() { try { localStorage.setItem('project', JSON.stringify({ total: total(), clips, zooms })); } catch {} }
+function saveProject() { try { localStorage.setItem('project', JSON.stringify({ total: total(), clips, zooms, voiceFree })); } catch {} }
 
 async function showProject(msg) {
   state.file = sources[0]?.file || null;
@@ -339,10 +340,10 @@ $('newProject').onclick = blankWorkspace;
 $('addFile').onchange = (e) => { addVideo(e.target.files[0]); e.target.value = ''; };
 
 // undo / redo: a snapshot is the clips, the videos and the recorded voice (the voice arrays are never changed in place, so keeping them is cheap)
-const snap = () => ({ clips: JSON.stringify(clips), zooms: JSON.stringify(zooms), sources: sources.slice(), take: state.take ? { samples: state.take.samples, rate: state.take.rate } : null });
+const snap = () => ({ clips: JSON.stringify(clips), zooms: JSON.stringify(zooms), voiceFree, sources: sources.slice(), take: state.take ? { samples: state.take.samples, rate: state.take.rate } : null });
 function checkpoint() { history.push(snap()); if (history.length > 15) history.shift(); future = []; updateUI(); }
 function applySnap(sn) {
-  clips = JSON.parse(sn.clips); zooms = JSON.parse(sn.zooms); zsel = null; pick = null; sources = sn.sources.slice(); cutStart = null;
+  clips = JSON.parse(sn.clips); zooms = JSON.parse(sn.zooms); voiceFree = !!sn.voiceFree; $('editMode').value = voiceFree ? 'video' : 'both'; zsel = null; pick = null; sources = sn.sources.slice(); cutStart = null;
   if (loaded >= sources.length) loaded = -1;
   state.take = sn.take ? { ...sn.take } : null; mixCache = null;
   rebuildPeaks(state.take?.samples || new Float32Array(0));
@@ -365,6 +366,51 @@ function removeSpan(a, b) {
   }
   clips = next;
 }
+
+// ---------- edits that change only the video ----------
+// Normally the voice belongs to the video: cutting a part of the video cuts the voice that goes with it. With "video only" the voice
+// is laid out on the finished timeline instead, so it stays exactly where it is and edits to the video do not move or remove it.
+// vt turns a position in the video into a position in the voice recording.
+const vt = (g) => (voiceFree ? toEdit(g) : g);
+const vInv = (t) => (voiceFree ? toSrc(t) : t);
+const voiceSec = () => (hasTake() ? state.take.samples.length / state.take.rate : 0);
+const overrunNote = () => (voiceFree && voiceSec() - editedLen() > 0.5 ? ` ${(voiceSec() - editedLen()).toFixed(1)}s of your voice now runs past the end of the video and will not be in the export.` : '');
+function setTakeSamples(samples, rate) {
+  state.take = { samples, rate }; state.attempts = {}; saveAttempts(); mixCache = null;
+  rebuildPeaks(samples); saveTake(); touched();
+}
+// video and voice -> video only: the voice is re-laid onto the edited timeline, so it sounds exactly the same right now
+function bakeVoice() {
+  if (!hasTake()) return;
+  const { samples, rate } = state.take;
+  setTakeSamples(concat(segs().map((g) => {
+    const from = Math.round(g.a * rate), raw = new Float32Array(Math.round((g.b - g.a) * rate));
+    if (from < samples.length) raw.set(samples.subarray(from, from + raw.length));
+    return stretch(raw, g.r);
+  })), rate);
+}
+// video only -> video and voice: each clip takes the voice that is under it on the timeline back to where it came from
+function unbakeVoice() {
+  if (!hasTake()) return;
+  const { samples, rate } = state.take, out = new Float32Array(Math.round(total() * rate));
+  for (const g of segs()) {
+    const from = Math.round(g.e0 * rate), piece = new Float32Array(Math.round(((g.b - g.a) / g.r) * rate));
+    if (from < samples.length) piece.set(samples.subarray(from, from + piece.length));
+    const back = stretch(piece, 1 / g.r), at = Math.round(g.a * rate);
+    out.set(back.subarray(0, Math.max(0, Math.min(back.length, out.length - at))), at);
+  }
+  setTakeSamples(out, rate);
+}
+$('editMode').onchange = (e) => {
+  const free = e.target.value === 'video';
+  if (free === voiceFree) return;
+  if (!canSeek()) { e.target.value = voiceFree ? 'video' : 'both'; return status('Stop recording first.'); }
+  stopPlay(); archiveTake(); checkpoint();
+  if (free) bakeVoice(); else unbakeVoice();
+  voiceFree = free;
+  saveProject(); touched(); renderCuts(); renderSections(); drawWave(); renderTakes(); updateUI();
+  status(free ? 'Edits now change only the video. Your voice stays exactly where it is on the timeline.' : 'Edits change the video and the voice together again. Your voice was moved back to match the video.');
+};
 
 const SRC_TINT = ['', 's1', 's2', 's3'];
 function renderCuts() {
@@ -436,7 +482,7 @@ function cutPress() {
   for (const [a, b] of spansForEdited(lo, hi)) removeSpan(a, b);
   commitEdit();
   seekTo(toSrc(lo));
-  status(`Removed ${(hi - lo).toFixed(1)}s. It is skipped in playback and left out of the export.`);
+  status(`Removed ${(hi - lo).toFixed(1)}s of video. It is skipped in playback and left out of the export.${voiceFree ? '' : ''}${overrunNote()}`);
 }
 function cancelCut() { if (cutStart !== null) { cutStart = null; renderCuts(); status('Cut cancelled.'); } }
 $('cut').onclick = cutPress;
@@ -456,14 +502,14 @@ function deleteClip() {
   checkpoint(); clips.splice(k, 1); commitEdit();
   if (!clips.length) { seekTo(0); return status('Everything was deleted. Press Undo (Ctrl+Z) to bring it back.'); }
   seekTo(toSrc(Math.min(at, editedLen() - 0.01)));
-  status(`Deleted the clip (${((c.b - c.a) / c.r).toFixed(1)}s).`);
+  status(`Deleted the clip (${((c.b - c.a) / c.r).toFixed(1)}s).${overrunNote()}`);
 }
 function setClipSpeed(r) {
   if (!canSeek()) return;
   const k = curIdx();
   if (k < 0) return;
   checkpoint(); clips[k].r = r; commitEdit();
-  status(r === 1 ? 'Clip back to normal speed.' : `Clip now plays at ${r}×. The voice is sped up to match when you export.`);
+  status(r === 1 ? 'Clip back to normal speed.' : `Clip now plays at ${r}×. ${voiceFree ? 'Your voice is not changed.' : 'The voice is sped up to match when you export.'}${overrunNote()}`);
 }
 $('split').onclick = splitHere;
 $('delClip').onclick = deleteClip;
@@ -667,19 +713,19 @@ const titleCard = (k) => { const text = $(k + 'Text').value.trim(), sec = +$(k +
 function finalAudio(cards = false) {
   const base = hasTake() ? mixed() : { samples: new Float32Array(0), rate: getCtx().sampleRate };
   const intro = cards ? titleCard('intro') : null, outro = cards ? titleCard('outro') : null;
-  const key = [editVer, $('fade').value, $('mvol').value, $('duck').checked, music?.id, intro?.sec, outro?.sec].join('|');
+  const key = [editVer, voiceFree, $('fade').value, $('mvol').value, $('duck').checked, music?.id, intro?.sec, outro?.sec].join('|');
   const hit = finalCache[cards];
   if (hit && hit.key === key && hit.base === base) return hit.audio;
   const rate = base.rate, list = segs(), joint = Math.round(rate * 0.01);
-  const parts = list.map((g) => {
+  const parts = voiceFree ? [] : list.map((g) => {
     const from = Math.round(g.a * rate), len = Math.round((g.b - g.a) * rate), raw = new Float32Array(len);
     if (from < base.samples.length) raw.set(base.samples.subarray(from, from + len));
     const out = stretch(raw, g.r);
     if (list.length > 1) for (let i = 0; i < Math.min(joint, out.length >> 1); i++) { const k = i / joint; out[i] *= k; out[out.length - 1 - i] *= k; } // no click where a cut joins
     return out;
   });
-  let v = concat(parts);
   const L = Math.round(editedLen() * rate);
+  let v = voiceFree ? base.samples.slice(0, L) : concat(parts); // video only: the voice is already laid out on the finished timeline
   if (v.length < L) v = concat([v, zeros(L - v.length)]);
   const fade = Math.round(+$('fade').value * rate);
   for (let i = 0; i < Math.min(fade, v.length >> 1); i++) { const k = i / fade; v[i] *= k; v[v.length - 1 - i] *= k; }
@@ -757,11 +803,11 @@ function drawWave() {
   if (ctx || peaks.length) {
     const rate = state.take?.rate || ctx?.sampleRate || 48000;
     g.fillStyle = '#ffb88e26';
-    const end = ((toEdit(Math.min(total(), (peaks.length * B) / rate)) - v.s) / v.len) * W;
+    const vsec = (peaks.length * B) / rate, end = (((voiceFree ? vsec : toEdit(Math.min(total(), vsec))) - v.s) / v.len) * W;
     g.fillRect(0, 0, Math.max(0, Math.min(W, end)), H);
     g.fillStyle = '#f08a4b';
     for (let x = 0; x < W; x++) {
-      const e = v.s + x * perPx, s0 = toSrc(e), r = speedAt(s0), b0 = Math.floor((s0 * rate) / B), b1 = Math.max(b0 + 1, Math.floor(((s0 + perPx * r) * rate) / B));
+      const e = v.s + x * perPx, s0 = voiceFree ? e : toSrc(e), r = voiceFree ? 1 : speedAt(s0), b0 = Math.floor((s0 * rate) / B), b1 = Math.max(b0 + 1, Math.floor(((s0 + perPx * r) * rate) / B));
       if (b0 >= peaks.length) break;
       let mx = 0;
       for (let b = b0; b < b1 && b < peaks.length; b++) mx = Math.max(mx, peaks[b]);
@@ -902,7 +948,7 @@ function fitToVoice() {
   }
   const picked = gaps.sort((a, b) => b.len - a.len).slice(0, need).sort((a, b) => a.end - b.end);
   if (picked.length < need) { status(`Found ${picked.length} clear pauses for ${need} section breaks. Use "Start here" to place them by hand.`); return; }
-  picked.forEach((g, i) => (sections[i + 1].start = Math.max(sections[i].start + 0.1, g.end * sec - 0.15)));
+  picked.forEach((g, i) => (sections[i + 1].start = Math.max(sections[i].start + 0.1, vInv(g.end * sec - 0.15))));
   marksChanged('Sections lined up with the pauses in your voice.');
 }
 
@@ -1093,17 +1139,17 @@ function splice(existing, start, end, pieces) {
   }
   return out;
 }
-const rangeEndIdx = () => (state.range ? Math.round(state.range.end * ctx.sampleRate) : null);
+const rangeEndIdx = () => (state.range ? Math.round(vt(state.range.end) * ctx.sampleRate) : null);
 
 function beginCapture(quiet = false) {
   if (!quiet) checkpoint();
   video.playbackRate = 1; // the voice is recorded in real time, so the video must not run faster or slower
-  capStart = Math.round(gNow() * ctx.sampleRate);
+  capStart = Math.round(vt(gNow()) * ctx.sampleRate);
   const have = hasTake() ? state.take.samples : new Float32Array(0);
   base = have; // splice() copies from it, the take itself is untouched until the capture is committed
   const r = state.range;
   if (r && !('old' in r)) { // remember the audio this retake replaces, so it can be brought back
-    const a = Math.round(r.start * ctx.sampleRate);
+    const a = Math.round(vt(r.start) * ctx.sampleRate);
     r.oldStart = a;
     r.old = have.slice(a, Math.min(rangeEndIdx(), have.length));
   }
@@ -1255,7 +1301,7 @@ function stopRecording() {
   video.playbackRate = +$('rate').value;
   state.recording = false; state.recPaused = false; state.range = null;
   video.muted = !$('hear').checked;
-  status(`Take saved (${fmt(toEdit(state.take.samples.length / state.take.rate))}). Play it back, record more from the playhead, or export.`);
+  status(`Take saved (${fmt(voiceFree ? voiceSec() : toEdit(voiceSec()))}). Play it back, record more from the playhead, or export.`);
   updateUI();
 }
 $('rec').onclick = () => (state.recording ? stopRecording() : startRecording());
@@ -1263,7 +1309,7 @@ $('pauseRec').onclick = () => (state.recPaused ? resumeRecording() : pauseRecord
 
 $('trim').onclick = () => {
   if (!hasTake()) return;
-  const n = Math.round(gNow() * state.take.rate);
+  const n = Math.round(vt(gNow()) * state.take.rate);
   if (n >= state.take.samples.length) { status('Nothing recorded after the playhead.'); return; }
   checkpoint();
   state.take.samples = state.take.samples.slice(0, n);
@@ -1284,10 +1330,10 @@ $('clear').onclick = () => { archiveTake(); checkpoint(); discardTake(); status(
 // ---------- takes ----------
 // Every time you stop recording, the voice as it stands is kept here, so you can listen back, star the best one and switch to it.
 let takeCounter = 0, listening = null;
-const takesMeta = () => kv.set('takes', { n: takeCounter, list: takes.map(({ id, name, stars, at, rate }) => ({ id, name, stars, at, rate })) });
+const takesMeta = () => kv.set('takes', { n: takeCounter, list: takes.map(({ id, name, stars, at, rate, free }) => ({ id, name, stars, at, rate, free })) });
 function archiveTake() {
   if (!hasTake() || takes.some((t) => t.samples === state.take.samples)) return;
-  const t = { id: crypto.randomUUID(), name: `Take ${++takeCounter}`, samples: state.take.samples, rate: state.take.rate, stars: 0, at: Date.now() };
+  const t = { id: crypto.randomUUID(), name: `Take ${++takeCounter}`, samples: state.take.samples, rate: state.take.rate, stars: 0, at: Date.now(), free: voiceFree };
   takes.push(t);
   kv.set('take-' + t.id, { samples: t.samples });
   while (takes.length > 10) { // keep ten; the oldest unstarred one goes first
@@ -1324,6 +1370,7 @@ $('takes').onclick = (e) => {
     listenSrc.start(); listening = t.id; renderTakes();
   } else if (b.dataset.a === 'use') {
     if (state.recording && !state.recPaused) return status('Stop recording first.');
+    if (!!t.free !== voiceFree) return status(`${t.name} was recorded with edits changing ${t.free ? 'the video only' : 'video and voice'}. Switch "Edits change" to match first.`);
     stopPlay(); try { listenSrc?.stop(); } catch {} listening = null;
     checkpoint(); archiveTake();
     state.take = { samples: t.samples, rate: t.rate }; mixCache = null;
@@ -1359,7 +1406,8 @@ async function redoLine() {
   if (i > 0 && g - lines[i].t0 < 0.8) i--; // you had only just started this sentence, so redo the one before
   const from = lines[i];
   pauseRecording(); // puts the voice recorded so far away and pauses the video
-  let t0 = nearestPause(from.t0) ?? from.t0;
+  const np = nearestPause(vt(from.t0));
+  let t0 = np == null ? from.t0 : vInv(np);
   if (state.range) t0 = Math.max(t0, state.range.start);
   await gSeek(snapG(t0));
   showCount(1);
@@ -1590,7 +1638,7 @@ updateUI();
   clips = sources.map((x) => ({ a: x.off, b: x.off + x.dur, r: 1 }));
   try { // the saved edit counts only if it still fits the videos
     const e = JSON.parse(localStorage.getItem('project') || 'null');
-    if (e && Math.abs(e.total - total()) < 0.05 && Array.isArray(e.clips) && e.clips.every((c) => c.b > c.a && c.a >= 0 && c.b <= total() + 0.01)) { clips = e.clips; zooms = (e.zooms || []).filter((z) => z.b > z.a); }
+    if (e && Math.abs(e.total - total()) < 0.05 && Array.isArray(e.clips) && e.clips.every((c) => c.b > c.a && c.a >= 0 && c.b <= total() + 0.01)) { clips = e.clips; zooms = (e.zooms || []).filter((z) => z.b > z.a); voiceFree = !!e.voiceFree; $('editMode').value = voiceFree ? 'video' : 'both'; }
   } catch {}
   const take = await kv.get('take');
   if (take?.samples?.length) { state.take = take; rebuildPeaks(take.samples); mixCache = null; }

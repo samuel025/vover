@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Voiceover Studio</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
+<noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" /></noscript>
 <link rel="stylesheet" href="style.css" />
 </head>
 <body class="app">
@@ -49,6 +50,9 @@
     <div class="clipbar">
       <button id="undo" class="btn sm" title="Undo (Ctrl+Z)" disabled>↶ Undo</button>
       <button id="redo" class="btn sm" title="Redo (Ctrl+Shift+Z)" disabled>↷ Redo</button>
+      <label class="chk" title="Choose whether cuts, trims, deletes and moves also change your recorded voice">Edits change
+        <select id="editMode"><option value="both">video and voice</option><option value="video">video only</option></select>
+      </label>
       <span class="gap"></span>
       <button id="split" class="btn sm" title="Split the video at the playhead (B)" disabled>Split</button>
       <button id="delClip" class="btn sm" title="Delete the clip under the playhead (Delete)" disabled>Delete clip</button>
