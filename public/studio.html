@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Voiceover Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<header class="bar">
+  <a class="brand" href="/"><span class="dot"></span>Voiceover Studio</a>
+  <div class="bar-actions">
+    <label class="btn ghost" for="file">Upload video</label>
+    <input id="file" type="file" accept="video/*" hidden />
+    <button id="export" class="btn primary" disabled>Export MP4</button>
+  </div>
+</header>
+
+<main class="layout">
+  <section class="stage card">
+    <div class="video-wrap" id="videoWrap">
+      <div class="empty" id="empty">
+        <div class="empty-icon">▶</div>
+        <p>Drop a video here or <label for="file" class="link">browse</label></p>
+        <small>MP4, MOV or WebM. The original sound is muted.</small>
+      </div>
+      <video id="video" playsinline muted hidden></video>
+      <div class="caption" id="caption" hidden></div>
+      <div class="countdown" id="countdown" hidden></div>
+      <div class="badge" id="badge" hidden><i></i><span id="badgeText">REC</span></div>
+    </div>
+
+    <div class="times"><span id="cur">0:00.0</span><span id="takeLen" class="sub"></span><span id="dur">0:00.0</span></div>
+    <div class="timeline disabled" id="timeline">
+      <canvas id="wave"></canvas>
+      <div class="marks" id="marks"></div>
+      <div class="clipsel" id="clipSel"></div>
+      <div class="cuts" id="cuts"></div>
+      <div class="playhead" id="playhead"><b></b></div>
+    </div>
+
+    <div class="clipbar">
+      <button id="undo" class="btn sm" title="Undo (Ctrl+Z)" disabled>↶ Undo</button>
+      <button id="redo" class="btn sm" title="Redo (Ctrl+Shift+Z)" disabled>↷ Redo</button>
+      <span class="gap"></span>
+      <button id="split" class="btn sm" title="Split the video at the playhead (B)" disabled>Split</button>
+      <button id="delClip" class="btn sm" title="Delete the clip under the playhead (Delete)" disabled>Delete clip</button>
+      <label class="chk">Clip speed
+        <select id="clipSpeed" disabled>
+          <option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option>
+          <option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option><option value="3">3×</option><option value="4">4×</option>
+        </select>
+      </label>
+      <small class="sub" id="clipInfo"></small>
+    </div>
+    <div class="cutbar" id="cutbar" hidden></div>
+    <div class="transport">
+      <div class="group">
+        <button id="toStart" class="btn icon" title="Back to start" disabled>⏮</button>
+        <button id="back" class="btn icon" title="Back 5s (←)" disabled>−5s</button>
+        <button id="play" class="btn main" title="Play / pause (Space)" disabled>Play</button>
+        <button id="fwd" class="btn icon" title="Forward 5s (→)" disabled>+5s</button>
+        <select id="rate" title="Playback speed">
+          <option value="0.5">0.5×</option><option value="0.75">0.75×</option>
+          <option value="1" selected>1×</option><option value="1.25">1.25×</option>
+          <option value="1.5">1.5×</option><option value="2">2×</option>
+        </select>
+        <label class="chk"><input id="hear" type="checkbox" /> Hear original</label>
+      </div>
+      <div class="group">
+        <button id="rec" class="btn rec" title="Record / stop (R)" disabled><span class="rdot"></span><span id="recLabel">Record</span></button>
+        <button id="pauseRec" class="btn" hidden>Pause</button>
+        <button id="cut" class="btn" title="Cut out part of the video: press at the start, move, press again at the end (X)" disabled>✂ Cut</button>
+        <button id="trim" class="btn" title="Cut the take at the playhead (T)" disabled>Trim end here</button>
+        <button id="clear" class="btn ghost" disabled>Discard take</button>
+      </div>
+    </div>
+    <div class="notice" id="recover" hidden><span id="recoverText"></span><span><button id="recoverYes" class="btn sm">Recover</button><button id="recoverNo" class="btn sm ghost">Dismiss</button></span></div>
+    <div class="status" id="status">Upload a video to begin</div>
+  </section>
+
+  <aside class="side">
+    <section class="card prompter-card">
+      <div class="card-head">
+        <h2>Script</h2>
+        <div class="seg">
+          <button id="tabEdit" class="on">Edit</button>
+          <button id="tabRead">Teleprompter</button>
+          <button id="tabSections">Sections</button>
+        </div>
+        <button id="fullscreen" class="btn icon sm" title="Fullscreen teleprompter (F)">⛶</button>
+      </div>
+      <textarea id="script" placeholder="Paste the text you want to read. Leave a blank line between sections, so you can retake them one at a time."></textarea>
+      <div id="prompter" class="prompter" hidden>
+        <div class="line"></div>
+        <div id="words" class="words"></div>
+        <div class="hud"><span id="hudSec"></span><span id="hudTime"></span><span id="hudState"></span></div>
+        <div class="hud-count" id="hudCount" hidden></div>
+        <div class="hud-keys">R record · Space pause · ↑↓ speed · M next section · S retake section · F exit</div>
+      </div>
+      <div id="sections" class="sections" hidden></div>
+      <div class="speed">
+        <span>Scroll speed</span>
+        <button id="slower" class="btn icon sm">−</button>
+        <input id="speed" type="range" min="0.4" max="2.5" step="0.05" value="1" />
+        <button id="faster" class="btn icon sm">+</button>
+        <b id="speedLabel">1.00×</b>
+      </div>
+      <small class="sub" id="wpm"></small>
+    </section>
+
+    <section class="card opts">
+      <h2>Options</h2>
+      <label class="row">Font size <input id="fs" type="range" min="20" max="64" value="34" /></label>
+      <label class="row">Voice volume <input id="vol" type="range" min="0" max="200" value="100" /></label>
+      <label class="row">Sync nudge <span><input id="nudge" type="number" step="10" value="0" /> ms</span></label>
+      <label class="row check"><input id="mirror" type="checkbox" /> Mirror text</label>
+      <label class="row check"><input id="keep" type="checkbox" /> Keep original as quiet background in export</label>
+      <label class="row">Mic <select id="mic"></select></label>
+      <div class="meter"><i id="level"></i></div>
+      <small id="levelHint" class="sub"></small>
+    </section>
+
+    <section class="card opts">
+      <h2>Audio polish</h2>
+      <label class="row check"><input id="denoise" type="checkbox" /> Reduce background noise</label>
+      <label class="row check"><input id="norm" type="checkbox" /> Even out the volume</label>
+      <label class="row">Fade voice in / out
+        <select id="fade"><option value="0">Off</option><option value="0.5">0.5 s</option><option value="1">1 s</option><option value="2">2 s</option></select>
+      </label>
+      <button id="pauses" class="btn sm" disabled title="Cuts long silences out of the recording and the video">Remove long pauses</button>
+      <div class="music">
+        <label class="btn sm" for="musicFile">Add background music</label>
+        <input id="musicFile" type="file" accept="audio/*" hidden />
+        <span id="musicName" class="sub"></span>
+        <div id="musicOpts" hidden>
+          <label class="row">Music volume <input id="mvol" type="range" min="0" max="100" value="25" /></label>
+          <label class="row check"><input id="duck" type="checkbox" checked /> Lower the music while I speak</label>
+          <button id="musicOff" class="btn sm ghost">Remove music</button>
+        </div>
+      </div>
+      <small class="sub" id="fxNote"></small>
+    </section>
+
+    <section class="card opts">
+      <h2>Picture &amp; text</h2>
+      <label class="row">Shape
+        <select id="shape"><option value="original">Original</option><option value="vertical">Vertical 9:16</option><option value="square">Square 1:1</option></select>
+      </label>
+      <label class="row" id="cropRow" hidden>Crop position <input id="crop" type="range" min="0" max="100" value="50" /></label>
+      <label class="row check"><input id="caps" type="checkbox" /> Captions from my script</label>
+      <button id="srt" class="btn sm" disabled>Download captions (.srt)</button>
+      <label class="row">Intro title <input id="introText" type="text" placeholder="e.g. How to get started" /></label>
+      <label class="row">Intro length <select id="introSec"><option value="0">None</option><option value="2">2 s</option><option value="3" selected>3 s</option><option value="4">4 s</option><option value="5">5 s</option></select></label>
+      <label class="row">Outro text <input id="outroText" type="text" placeholder="e.g. Thanks for watching" /></label>
+      <label class="row">Outro length <select id="outroSec"><option value="0">None</option><option value="2">2 s</option><option value="3" selected>3 s</option><option value="4">4 s</option><option value="5">5 s</option></select></label>
+      <small class="sub">Title cards are added when you export. Captions, cropping and speed changes need Chrome or Edge.</small>
+    </section>
+
+    <section class="card opts keys">
+      <h2>Keyboard</h2>
+      <div class="kgrid">
+        <span><kbd>R</kbd> record / stop</span><span><kbd>Space</kbd> play · pause</span>
+        <span><kbd>T</kbd> trim end</span><span><kbd>F</kbd> fullscreen</span>
+        <span><kbd>↑</kbd><kbd>↓</kbd> scroll speed</span><span><kbd>←</kbd><kbd>→</kbd> seek 5s</span>
+        <span><kbd>[</kbd><kbd>]</kbd> section back · next</span><span><kbd>M</kbd> next section starts now</span>
+        <span><kbd>S</kbd> retake this section</span><span><kbd>X</kbd> cut start · end</span>
+        <span><kbd>Esc</kbd> cancel a cut</span><span><kbd>B</kbd> split at playhead</span>
+        <span><kbd>Del</kbd> delete clip</span><span><kbd>Ctrl</kbd><kbd>Z</kbd> undo · <kbd>Shift</kbd> redo</span>
+      </div>
+    </section>
+  </aside>
+</main>
+<script src="app.js" type="module"></script>
+</body>
+</html>

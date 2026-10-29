@@ -1,0 +1,16 @@
+{
+  "name": "voiceover-studio",
+  "version": "0.1.0",
+  "description": "Record a voiceover over any video with a synced teleprompter, then export a narrated MP4.",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node server.js",
+    "vendor": "node scripts/vendor.mjs"
+  },
+  "devDependencies": {
+    "mediabunny": "^1.63.0"
+  }
+}

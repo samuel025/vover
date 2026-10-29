@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Voiceover Studio: narrate any video in minutes</title>
+<meta name="description" content="Upload a video, paste your script, read it from a teleprompter that moves with the video, and export a narrated MP4. No editing skills, nothing to install." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+:root{--bg:#fafafa;--surface:#fff;--text:#171717;--sub:#737373;--border:#00000014;--hover:#f5f5f5;--accent:#ffb88e;--accent-deep:#f08a4b;--rec:#e5484d;--r:20px}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:inherit}
+.wrap{max-width:1120px;margin:0 auto;padding:0 24px}
+
+/* nav */
+nav{position:sticky;top:0;z-index:10;background:#ffffffeb;backdrop-filter:blur(12px);border-bottom:1px solid var(--border)}
+nav .wrap{display:flex;align-items:center;justify-content:space-between;height:60px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:600;text-decoration:none;letter-spacing:-.01em}
+.dot{width:12px;height:12px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px #ffb88e33}
+.links{display:flex;align-items:center;gap:24px;font-size:14px;color:var(--sub)}
+.links a{text-decoration:none}.links a:hover{color:var(--text)}
+.btn{display:inline-flex;align-items:center;gap:8px;height:44px;padding:0 22px;border-radius:999px;border:1px solid var(--border);background:var(--surface);font:500 15px Inter;text-decoration:none;color:var(--text);transition:.15s}
+.btn:hover{background:var(--hover)}
+.btn.dark{background:var(--text);border-color:var(--text);color:#fff}
+.btn.dark:hover{background:#333}
+.btn.sm{height:36px;padding:0 16px;font-size:13px}
+
+/* hero */
+.hero{text-align:center;padding:88px 0 48px}
+.pill{display:inline-flex;align-items:center;gap:8px;padding:6px 14px;border:1px solid var(--border);border-radius:999px;background:var(--surface);font-size:13px;color:var(--sub)}
+.pill i{width:8px;height:8px;border-radius:50%;background:var(--rec);animation:blink 1.4s infinite}
+@keyframes blink{50%{opacity:.25}}
+h1{font-size:clamp(38px,6.4vw,72px);line-height:1.04;letter-spacing:-.035em;margin:22px auto 18px;max-width:14ch;font-weight:700}
+h1 em{font-style:normal;background:linear-gradient(transparent 62%,#ffb88e99 62%)}
+.lede{max-width:600px;margin:0 auto 32px;color:var(--sub);font-size:19px}
+.cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+.fine{margin-top:16px;font-size:13px;color:var(--sub)}
+
+/* product mock */
+.mock{margin:56px auto 0;max-width:1000px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);box-shadow:0 30px 80px -30px #00000033,0 1px 2px #0000000a;padding:14px;text-align:left}
+.mock-bar{display:flex;gap:6px;padding:0 4px 12px}
+.mock-bar i{width:10px;height:10px;border-radius:50%;background:#e5e5e5}
+.mock-grid{display:grid;grid-template-columns:1.7fr 1fr;gap:12px}
+.screen{position:relative;aspect-ratio:16/9;border-radius:12px;overflow:hidden;background:linear-gradient(135deg,#1f2937,#111 55%,#3b2a20)}
+.screen::before{content:"";position:absolute;width:55%;aspect-ratio:1;right:-8%;top:-20%;border-radius:50%;background:radial-gradient(circle,#ffb88e88,transparent 65%)}
+.ui{position:absolute;left:8%;bottom:14%;right:30%;display:grid;gap:8px}
+.ui b{height:10px;border-radius:6px;background:#ffffff2e}
+.ui b:nth-child(1){width:60%;height:14px;background:#ffffff55}.ui b:nth-child(3){width:75%}.ui b:nth-child(4){width:40%}
+.live{position:absolute;top:12px;left:12px;display:flex;gap:8px;align-items:center;background:#000a;color:#fff;font-size:11px;font-weight:600;padding:4px 10px;border-radius:999px}
+.live i{width:8px;height:8px;border-radius:50%;background:var(--rec);animation:blink 1s infinite}
+.tele{position:relative;border-radius:12px;background:#111;color:#fff;overflow:hidden;min-height:180px}
+.tele::after{content:"";position:absolute;left:0;right:0;top:40%;height:2px;background:var(--accent);opacity:.5}
+.tele-text{position:absolute;left:16px;right:16px;font-size:17px;line-height:1.55;font-weight:500;animation:scroll 14s linear infinite}
+.tele-text span{opacity:.35}.tele-text .on{opacity:1;color:var(--accent)}
+@keyframes scroll{from{transform:translateY(60px)}to{transform:translateY(-190px)}}
+.tl{position:relative;grid-column:1/-1;height:64px;border-radius:12px;background:var(--hover);border:1px solid var(--border);overflow:hidden;display:flex;align-items:center;gap:2px;padding:0 6px}
+.tl b{flex:1;background:var(--accent-deep);border-radius:2px;opacity:.85}
+.tl .ph{position:absolute;top:0;bottom:0;width:2px;background:var(--text);left:0;animation:ph 14s linear infinite}
+@keyframes ph{to{left:100%}}
+
+/* sections */
+section{padding:88px 0}
+.kicker{font-size:13px;font-weight:600;color:var(--accent-deep);letter-spacing:.06em;text-transform:uppercase}
+h2{font-size:clamp(28px,4vw,42px);letter-spacing:-.025em;line-height:1.12;margin:10px 0 14px}
+.sec-lede{color:var(--sub);max-width:560px;font-size:17px;margin:0}
+.steps{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:44px;counter-reset:s}
+.step{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:24px;counter-increment:s}
+.step::before{content:counter(s);display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:#ffb88e40;color:#b45a1d;font-weight:600;margin-bottom:16px}
+.step h3{margin:0 0 6px;font-size:17px}.step p{margin:0;color:var(--sub);font-size:15px}
+.feat{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:44px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:26px}
+.card .ic{width:40px;height:40px;border-radius:12px;background:var(--hover);display:grid;place-items:center;font:600 16px Inter;color:#b45a1d;background:#ffb88e40;margin-bottom:16px}
+.card h3{margin:0 0 6px;font-size:17px}.card p{margin:0;color:var(--sub);font-size:15px}
+.who{display:flex;flex-wrap:wrap;gap:10px;margin-top:32px}
+.who span{padding:9px 18px;border:1px solid var(--border);border-radius:999px;background:var(--surface);font-size:15px}
+.band{background:var(--text);color:#fff;border-radius:28px;padding:64px 32px;text-align:center}
+.band h2{max-width:16ch;margin:0 auto 14px}.band p{color:#a3a3a3;margin:0 auto 28px;max-width:480px}
+.band .btn{background:#fff;color:var(--text);border-color:#fff}
+details{border-bottom:1px solid var(--border);padding:18px 0}
+summary{cursor:pointer;font-weight:500;font-size:17px;list-style:none;display:flex;justify-content:space-between}
+summary::after{content:"+";color:var(--sub)}details[open] summary::after{content:"−"}
+details p{color:var(--sub);margin:10px 0 0;max-width:640px}
+footer{padding:36px 0 48px;color:var(--sub);font-size:14px;border-top:1px solid var(--border)}
+footer .wrap{display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px}
+
+@media(max-width:860px){.steps{grid-template-columns:1fr 1fr}.feat{grid-template-columns:1fr}.mock-grid{grid-template-columns:1fr}.links a:not(.btn){display:none}.hero{padding-top:56px}}
+@media(max-width:520px){.steps{grid-template-columns:1fr}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important}}
+</style>
+</head>
+<body>
+<nav><div class="wrap">
+  <a class="brand" href="/"><span class="dot"></span>Voiceover Studio</a>
+  <div class="links"><a href="#how">How it works</a><a href="#features">Features</a><a href="#faq">FAQ</a><a class="btn dark sm" href="/studio">Open studio</a></div>
+</div></nav>
+
+<header class="wrap hero">
+  <span class="pill"><i></i>Record, read and export in one tab</span>
+  <h1>Narrate any video in <em>minutes</em></h1>
+  <p class="lede">Upload a video, paste your script and read it from a teleprompter that moves with the picture. Export an MP4 with your voice, in sync.</p>
+  <div class="cta">
+    <a class="btn dark" href="/studio">Start narrating →</a>
+    <a class="btn" href="#how">See how it works</a>
+  </div>
+  <p class="fine">No sign-up. Nothing to install. Your video stays on your device.</p>
+
+  <div class="mock" aria-hidden="true">
+    <div class="mock-bar"><i></i><i></i><i></i></div>
+    <div class="mock-grid">
+      <div class="screen"><div class="live"><i></i>REC 00:14.2</div><div class="ui"><b></b><b></b><b></b><b></b></div></div>
+      <div class="tele"><div class="tele-text">
+        <span>Welcome to the product tour.</span> <span>Today we will look at how the dashboard works,</span> <span class="on">starting with your first project</span> <span>and how to invite your team.</span> <span>Every section is designed to save you time,</span> <span>so you can focus on what matters.</span>
+      </div></div>
+      <div class="tl" id="tl"><div class="ph"></div></div>
+    </div>
+  </div>
+</header>
+
+<section id="how"><div class="wrap">
+  <div class="kicker">How it works</div>
+  <h2>From raw footage to narrated video</h2>
+  <p class="sec-lede">Four steps, one page. No timeline to learn and no separate recorder to line up.</p>
+  <div class="steps">
+    <div class="step"><h3>Upload your video</h3><p>Drop in an MP4, MOV or WebM. The original sound is muted so it never leaks into your mic.</p></div>
+    <div class="step"><h3>Paste your script</h3><p>Drop in your text. The teleprompter spreads it across the video and scrolls with it.</p></div>
+    <div class="step"><h3>Record your voice</h3><p>Press record, get a three second countdown, then read the highlighted line while the video plays.</p></div>
+    <div class="step"><h3>Export the MP4</h3><p>Your voice replaces the original audio. Download a standard MP4 that plays everywhere.</p></div>
+  </div>
+</div></section>
+
+<section id="features" style="padding-top:24px"><div class="wrap">
+  <div class="kicker">Features</div>
+  <h2>Everything you need, nothing you don't</h2>
+  <div class="feat">
+    <div class="card"><div class="ic">Aa</div><h3>Teleprompter that follows you</h3><p>Mark where each section starts and the script keeps pace with your video. Go fullscreen and run it from the keyboard.</p></div>
+    <div class="card"><div class="ic">II</div><h3>Pause and play back</h3><p>Pause while recording, listen to what you have so far, and find exactly where you want to pick up.</p></div>
+    <div class="card"><div class="ic">✂</div><h3>Retake one section</h3><p>Split the script with blank lines and redo just one part. Keep earlier takes and switch back to any of them.</p></div>
+    <div class="card"><div class="ic">∿</div><h3>Waveform timeline</h3><p>A moving playhead over your voice waveform. Click or drag to scrub through the recording.</p></div>
+    <div class="card"><div class="ic">≡</div><h3>Edit like a timeline</h3><p>Cut, split, delete clips, speed parts up or down, and undo anything. Add captions, music, title cards and a vertical crop.</p></div>
+    <div class="card"><div class="ic">≡</div><h3>Fine control</h3><p>Voice volume, millisecond sync nudge, playback speed from 0.5× to 2×, and an optional quiet original track.</p></div>
+    <div class="card"><div class="ic">↻</div><h3>Never lose a take</h3><p>Recordings are saved as you speak. Refresh or crash and you can pick up where you left off.</p></div>
+  </div>
+</div></section>
+
+<section style="padding-top:24px"><div class="wrap">
+  <div class="kicker">Who it's for</div>
+  <h2>Made for people who talk over video</h2>
+  <div class="who"><span>Course creators</span><span>Teachers</span><span>Product marketers</span><span>Social media managers</span><span>Agencies and freelancers</span><span>Community and church media teams</span></div>
+</div></section>
+
+<section><div class="wrap"><div class="band">
+  <h2>Your next video, narrated today</h2>
+  <p>Bring a video and a script. You can have an exported voiceover before your coffee gets cold.</p>
+  <a class="btn" href="/studio">Open the studio →</a>
+</div></div></section>
+
+<section id="faq" style="padding-top:0"><div class="wrap">
+  <div class="kicker">FAQ</div>
+  <h2>Questions</h2>
+  <details><summary>Do I need to create an account?</summary><p>No. Open the studio and start. Your work is saved in your own browser so a refresh does not lose it.</p></details>
+  <details><summary>What happens to the original sound?</summary><p>It is muted while you record and removed on export. If you prefer, you can keep it as a quiet background track.</p></details>
+  <details><summary>Is my video uploaded anywhere?</summary><p>For most MP4 and MOV files, no. The export is built in your browser, so the video never leaves your device and there is no size limit beyond what your computer can handle. Some formats, such as WebM, and the "keep original audio" option are processed on our server instead.</p></details>
+  <details><summary>Which video formats work?</summary><p>MP4, MOV and WebM. MP4 and MOV keep their original picture quality. Other formats are converted to H.264.</p></details>
+  <details><summary>Can I fix a mistake without re-recording everything?</summary><p>Yes. Pause, play back to find the spot, trim your voice there and continue recording from that point.</p></details>
+  <details><summary>Do I need a special microphone?</summary><p>No. Any built-in or headset microphone works. Pick it in the options panel and watch the level meter before you record.</p></details>
+</div></section>
+
+<footer><div class="wrap"><span>© Voiceover Studio</span><a href="/studio">Open studio</a></div></footer>
+<script>
+  // decorative waveform for the product mock
+  const tl = document.getElementById('tl');
+  for (let i = 0; i < 90; i++) { const b = document.createElement('b'); b.style.height = (14 + Math.abs(Math.sin(i * .37) * Math.cos(i * .11)) * 70) + '%'; tl.insertBefore(b, tl.lastElementChild); }
+</script>
+</body>
+</html>
