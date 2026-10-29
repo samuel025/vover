@@ -1,4 +1,4 @@
-import { denoise, normaliseGain, stretch, mixMusic, findPauses, buildCaptions, toSrt } from './fx.js';
+import { denoise, normaliseGain, stretch, mixMusic, findPauses, buildCaptions, toSrt, enhanceVoice, zoomState } from './fx.js';
 import { exportLocally, pickSaveTarget, Unsupported } from './export.js';
 
 const $ = (id) => document.getElementById(id);
@@ -12,7 +12,7 @@ let base = new Float32Array(0), chunks = [], chunkLen = 0, capturing = false;
 let spans = [], lastNow = -1, lastSec = -1;
 let speed = 1;
 let capStart = 0, draft = null;
-let cutStart = null, editVer = 0, history = [], future = [], music = null, musicId = 0, takes = [], playK = -1;
+let cutStart = null, editVer = 0, history = [], future = [], music = null, musicId = 0, takes = [], playK = -1, zooms = [], zsel = null, pick = null, zoomDirty = false;
 let cleaned = null, cleaning = null, finalCache = {}, abCache = null, lastClipKey = '', lastCap = null;
 
 const B = 1024; // samples per waveform bucket
@@ -72,6 +72,7 @@ function updateUI() {
   wrap.classList.toggle('gone', gone);
   if (gone) for (const k of ['cut', 'rec', 'play', 'toStart', 'back', 'fwd']) $(k).disabled = true;
   $('pauses').disabled = !idle || !hasTake();
+  $('zoomAdd').disabled = !idle;
   $('srt').disabled = !v;
   $('cut').textContent = cutStart === null ? '✂ Cut' : '✂ Cut ends here';
   $('clear').disabled = rec || !hasTake();
@@ -221,7 +222,7 @@ const plainEdit = () => sources.length === 1 && clips.every((c, i) => c.r === 1 
 
 function newProject() {
   discardTake();
-  sources = []; clips = []; loaded = -1; takes = []; cutStart = null; history = []; future = []; touched();
+  sources = []; clips = []; zooms = []; zsel = null; pick = null; loaded = -1; takes = []; cutStart = null; history = []; future = []; touched();
   try { localStorage.removeItem('project'); localStorage.removeItem('marks'); } catch {}
   kv.get('sources').then((m) => { for (const x of m || []) kv.del('src-' + x.id); kv.del('video'); }).then(() => kv.del('takes'));
 }
@@ -232,13 +233,13 @@ async function addSource(file, id) {
   return s;
 }
 const saveSources = () => kv.set('sources', sources.map(({ id, name, dur }) => ({ id, name, dur })));
-function saveProject() { try { localStorage.setItem('project', JSON.stringify({ total: total(), clips })); } catch {} }
+function saveProject() { try { localStorage.setItem('project', JSON.stringify({ total: total(), clips, zooms })); } catch {} }
 
 async function showProject(msg) {
   state.file = sources[0]?.file || null;
   video.hidden = !sources.length; $('empty').hidden = !!sources.length;
   await gSeek(clips.length ? clips[0].a : 0);
-  touched(); layoutWords(); renderCuts(); renderTakes(); updateUI();
+  touched(); layoutWords(); renderCuts(); renderTakes(); renderZooms(); updateUI();
   if (msg) status(msg);
 }
 // Starts a new project from one video.
@@ -270,20 +271,34 @@ async function addVideo(file) {
     clips.push({ a: s.off, b: s.off + s.dur, r: 1 });
     kv.set('src-' + s.id, { file }); saveSources();
     commitEdit(); updateUI();
-    status(`Added ${file.name} at the end. Your script and recording now run across both videos. Use Upload video to start over instead.`);
+    status(`Added ${file.name} at the end. Your script and recording now run across both videos. Use New project to start over instead.`);
   } catch { history.pop(); status('This browser cannot play that video. Try an MP4 (H.264) or WebM file.'); }
 }
+// A blank workspace: the video, script, recording, takes, music and edits are cleared (the original video file is never touched).
+function blankWorkspace() {
+  if (state.recording && !state.recPaused) return status('Stop recording first.');
+  if (sources.length && !confirm('Start a blank workspace? Your video, script, recording and edits will be cleared. The original video file on your computer is not touched.')) return;
+  stopAll();
+  newProject();
+  state.file = null; state.serverId = null;
+  video.removeAttribute('src'); video.load();
+  scriptEl.value = ''; try { localStorage.removeItem('script'); } catch {}
+  music = null; kv.del('music'); $('musicName').textContent = ''; $('musicOpts').hidden = true;
+  renderSections(); drawWave();
+  showProject('Blank workspace. Drop a video here or click browse to begin.');
+}
+$('newProject').onclick = blankWorkspace;
 $('addFile').onchange = (e) => { addVideo(e.target.files[0]); e.target.value = ''; };
 
 // undo / redo: a snapshot is the clips, the videos and the recorded voice (the voice arrays are never changed in place, so keeping them is cheap)
-const snap = () => ({ clips: JSON.stringify(clips), sources: sources.slice(), take: state.take ? { samples: state.take.samples, rate: state.take.rate } : null });
+const snap = () => ({ clips: JSON.stringify(clips), zooms: JSON.stringify(zooms), sources: sources.slice(), take: state.take ? { samples: state.take.samples, rate: state.take.rate } : null });
 function checkpoint() { history.push(snap()); if (history.length > 15) history.shift(); future = []; updateUI(); }
 function applySnap(sn) {
-  clips = JSON.parse(sn.clips); sources = sn.sources.slice(); cutStart = null;
+  clips = JSON.parse(sn.clips); zooms = JSON.parse(sn.zooms); zsel = null; pick = null; sources = sn.sources.slice(); cutStart = null;
   if (loaded >= sources.length) loaded = -1;
   state.take = sn.take ? { ...sn.take } : null; mixCache = null;
   rebuildPeaks(state.take?.samples || new Float32Array(0));
-  saveProject(); saveSources(); saveTake(); touched(); renderCuts(); renderSections(); drawWave(); updateUI();
+  saveProject(); saveSources(); saveTake(); touched(); renderCuts(); renderZooms(); renderSections(); drawWave(); updateUI();
   if (loaded < 0 || clipIndexAt(gNow()) < 0) gSeek(snapG(gNow()));
 }
 function undo() { if (!canSeek() || !history.length) return; stopPlay(); future.push(snap()); applySnap(history.pop()); status('Undone.'); }
@@ -315,7 +330,8 @@ function renderCuts() {
   $('cuts').innerHTML = list.slice(1).map((s, i) => {
     const prev = list[i], joined = Math.abs(prev.b - s.a) < 1e-3 && prev.src === s.src && prev.r === s.r;
     return `<i class="${joined ? 'split' : ''}" style="left:${(s.e0 / L) * 100}%"></i>`;
-  }).join('') + (cutStart === null ? '' : `<i class="pending" style="left:${(toEdit(cutStart) / L) * 100}%"></i>`);
+  }).join('') + (cutStart === null ? '' : `<i class="pending" style="left:${(toEdit(cutStart) / L) * 100}%"></i>`)
+    + zooms.map((z) => `<b class="zm${z === zsel ? ' sel' : ''}" style="left:${(toEdit(z.a) / L) * 100}%;width:${Math.max(0.5, ((toEdit(z.b) - toEdit(z.a)) / L) * 100)}%">🔍 ${z.k.toFixed(1)}×</b>`).join('');
   $('dur').textContent = fmt(editedLen());
   const gaps = gapsOf(), bar = $('cutbar');
   bar.hidden = !gaps.length && cutStart === null;
@@ -488,6 +504,89 @@ function moveHint(e) {
   strip.append(line);
 }
 
+// ---------- zoom & pan ----------
+// Where the picture sits inside the player (it can be letterboxed, or cropped to a vertical or square shape).
+function pictureRect() {
+  const W = video.clientWidth, H = video.clientHeight, vw = video.videoWidth, vh = video.videoHeight;
+  if (!vw || !W) return null;
+  const cover = $('shape').value !== 'original', k = cover ? Math.max(W / vw, H / vh) : Math.min(W / vw, H / vh);
+  const pw = vw * k, ph = vh * k;
+  return { pw, ph, ox: cover ? (W - pw) * ($('crop').value / 100) : (W - pw) / 2, oy: (H - ph) / 2 };
+}
+// shows the zoom in the preview by scaling the player itself
+function applyZoomPreview(g) {
+  const zs = pick ? null : zoomState(zooms, g), r = zs && pictureRect();
+  if (!zs || !r) { if (video.style.transform) video.style.transform = ''; return; }
+  video.style.transformOrigin = '0 0';
+  video.style.transform = `translate(${r.ox}px,${r.oy}px) scale(${zs.k}) translate(${-(r.ox + zs.x * r.pw)}px,${-(r.oy + zs.y * r.ph)}px)`;
+}
+function placeDots() {
+  const r = pictureRect(), show = !!(pick && zsel && r);
+  $('zdotA').hidden = $('zdotB').hidden = !show;
+  if (!show) return;
+  for (const [id, x, y] of [['zdotA', zsel.x1, zsel.y1], ['zdotB', zsel.x2, zsel.y2]]) { $(id).style.left = r.ox + x * r.pw + 'px'; $(id).style.top = r.oy + y * r.ph + 'px'; }
+  $('zdotB').hidden = !zsel.pan;
+}
+function zoomChanged() { touched(); saveProject(); renderCuts(); }
+function renderZooms() {
+  const el = $('zoomList');
+  $('zoomAdd').disabled = !state.file || (state.recording && !state.recPaused);
+  if (!zooms.length) { el.innerHTML = '<p class="sub">Add a zoom to point at part of the screen, for example a button in a screen recording. It eases in, holds, and eases out.</p>'; return; }
+  el.innerHTML = zooms.map((z, i) => {
+    const sel = z === zsel;
+    return `<div class="zoom${sel ? ' sel' : ''}" data-i="${i}"><div class="zhead" data-a="select"><b>Zoom ${i + 1}</b><span class="meta">${fmt(toEdit(z.a))} · ${(z.b - z.a).toFixed(1)}s · ${z.k.toFixed(1)}×${z.pan ? ' · pans' : ''}</span><button class="btn sm ghost" data-a="del" title="Remove this zoom">✕</button></div>
+      ${sel ? `<label class="row">Zoom in <input type="range" data-f="k" min="1.2" max="4" step="0.1" value="${z.k}" /></label>
+      <label class="row">Length <input type="range" data-f="len" min="1" max="15" step="0.5" value="${Math.min(15, z.b - z.a)}" /></label>
+      <div class="acts"><button class="btn sm${pick === 'start' ? ' on' : ''}" data-a="start">${pick === 'start' ? 'Click the video…' : 'Choose where to zoom'}</button><button class="btn sm${pick === 'end' ? ' on' : ''}" data-a="end">${pick === 'end' ? 'Click the video…' : z.pan ? 'Change where it pans to' : 'Pan to somewhere else'}</button>${z.pan ? '<button class="btn sm ghost" data-a="nopan">Stop panning</button>' : ''}</div>` : ''}</div>`;
+  }).join('');
+  wrap.classList.toggle('picking', !!pick);
+}
+$('zoomAdd').onclick = () => {
+  if (!total()) return;
+  const g = gNow(), next = Math.min(total(), ...zooms.filter((z) => z.a > g).map((z) => z.a));
+  if (zooms.some((z) => g < z.b && g >= z.a)) return status('There is already a zoom here. Move the playhead to an empty part first.');
+  if (next - g < 0.5) return status('Not enough room for a zoom here. Move the playhead earlier.');
+  checkpoint();
+  zsel = { a: g, b: Math.min(g + 3, next), k: 2, x1: 0.5, y1: 0.5, x2: 0.5, y2: 0.5, pan: false };
+  zooms.push(zsel); zooms.sort((p, q) => p.a - q.a); pick = null;
+  zoomChanged(); renderZooms();
+  status('Zoom added. Press "Choose where to zoom", then click the spot on the video.');
+};
+$('zoomList').onclick = (e) => {
+  const b = e.target.closest('[data-a]'), row = e.target.closest('.zoom');
+  if (!b || !row) return;
+  const z = zooms[+row.dataset.i], a = b.dataset.a;
+  if (a === 'select') { zsel = z; pick = null; seekTo(Math.min(z.b - 0.05, z.a + Math.min(1, (z.b - z.a) / 2))); }
+  else if (a === 'del') { checkpoint(); zooms = zooms.filter((q) => q !== z); if (zsel === z) { zsel = null; pick = null; } zoomChanged(); }
+  else if (a === 'start' || a === 'end') { zsel = z; pick = pick === a ? null : a; if (pick) status('Click the spot on the video.'); }
+  else if (a === 'nopan') { checkpoint(); z.pan = false; z.x2 = z.x1; z.y2 = z.y1; zoomChanged(); }
+  renderZooms();
+};
+// sliders: the first movement saves one undo step, then the zoom follows the slider
+$('zoomList').oninput = (e) => {
+  const f = e.target.dataset.f;
+  if (!f || !zsel) return;
+  if (!zoomDirty) { checkpoint(); zoomDirty = true; }
+  if (f === 'k') zsel.k = +e.target.value;
+  else { const next = Math.min(total(), ...zooms.filter((z) => z.a > zsel.a).map((z) => z.a)); zsel.b = Math.min(zsel.a + +e.target.value, next); }
+  const meta = $('zoomList').querySelector('.zoom.sel .meta');
+  if (meta) meta.textContent = `${fmt(toEdit(zsel.a))} · ${(zsel.b - zsel.a).toFixed(1)}s · ${zsel.k.toFixed(1)}×${zsel.pan ? ' · pans' : ''}`;
+  zoomChanged();
+};
+$('zoomList').onchange = () => { zoomDirty = false; };
+// choosing a spot: click the video while "Choose where to zoom" / "Pan to" is on
+wrap.addEventListener('click', (e) => {
+  if (!pick || !zsel) return;
+  const r = pictureRect(), b = wrap.getBoundingClientRect();
+  if (!r) return;
+  const x = Math.max(0, Math.min(1, (e.clientX - b.left - r.ox) / r.pw)), y = Math.max(0, Math.min(1, (e.clientY - b.top - r.oy) / r.ph));
+  checkpoint();
+  if (pick === 'start') { zsel.x1 = x; zsel.y1 = y; if (!zsel.pan) { zsel.x2 = x; zsel.y2 = y; } }
+  else { zsel.x2 = x; zsel.y2 = y; zsel.pan = true; }
+  pick = null; zoomChanged(); renderZooms();
+  status(zsel.pan ? 'Done. The zoom slides from the first spot to the second.' : 'Done. Play it to see the zoom.');
+});
+
 // ---------- audio: noise, volume, fades, music ----------
 function ensureClean() {
   if (!$('denoise').checked || !hasTake() || cleaned?.ref === state.take.samples) return Promise.resolve();
@@ -546,7 +645,7 @@ $('musicFile').onchange = (e) => { if (e.target.files[0]) loadMusic(e.target.fil
 $('musicOff').onclick = () => { music = null; kv.del('music'); $('musicName').textContent = ''; $('musicOpts').hidden = true; touched(); updateUI(); };
 
 // ---------- picture & text settings ----------
-const fxIds = ['denoise', 'norm', 'fade', 'mvol', 'duck', 'shape', 'crop', 'caps', 'introText', 'introSec', 'outroText', 'outroSec'];
+const fxIds = ['denoise', 'norm', 'eq', 'deess', 'fade', 'mvol', 'duck', 'shape', 'crop', 'caps', 'introText', 'introSec', 'outroText', 'outroSec'];
 function applyShape() {
   const sh = $('shape').value;
   wrap.classList.toggle('shape-vertical', sh === 'vertical');
@@ -557,7 +656,7 @@ function applyShape() {
 for (const id of fxIds) {
   $(id).addEventListener('change', () => {
     try { localStorage.setItem('fx', JSON.stringify(Object.fromEntries(fxIds.map((k) => [k, $(k).type === 'checkbox' ? $(k).checked : $(k).value])))); } catch {}
-    if (id === 'denoise' || id === 'norm') { mixCache = null; touched(); }
+    if (id === 'denoise' || id === 'norm' || id === 'eq' || id === 'deess') { mixCache = null; touched(); }
     if (id === 'denoise') ensureClean();
     applyShape(); touched();
   });
@@ -797,6 +896,7 @@ function tick() {
     if (Math.abs(video.playbackRate - want) > 1e-3) video.playbackRate = want;
   }
   updateClip();
+  applyZoomPreview(t); placeDots();
   if ($('caps').checked) {
     const c = captionList().find((x) => t >= x.t0 && t < x.t1);
     if (c !== lastCap) { lastCap = c; $('caption').hidden = !c; $('caption').innerHTML = c ? `<span>${esc(c.text)}</span>` : ''; }
@@ -1182,11 +1282,19 @@ async function redoLine() {
 $('redoLine').onclick = redoLine;
 
 // ---------- mix (nudge + volume) ----------
+let enhCache = null;
+function enhanced(src, rate) { // voice tone and de-esser, kept until the voice or the settings change
+  const eq = $('eq').value, de = $('deess').value, key = eq + '|' + de;
+  if (eq === 'off' && de === 'off') return src;
+  if (enhCache?.ref !== src || enhCache.key !== key) enhCache = { ref: src, key, samples: enhanceVoice(src, rate, { eq, deess: de }) };
+  return enhCache.samples;
+}
 function mixed() {
   if (mixCache) return mixCache;
   const { rate } = state.take;
   let src = state.take.samples;
   if ($('denoise').checked && cleaned?.ref === src) src = cleaned.samples; // the cleaned copy is made in the background
+  src = enhanced(src, rate);
   const nudge = Math.round((Number($('nudge').value) || 0) * rate / 1000);
   const gain = ($('vol').value / 100) * ($('norm').checked ? normaliseGain(src) : 1);
   const out = new Float32Array(Math.max(0, src.length + nudge));
@@ -1321,15 +1429,15 @@ $('export').onclick = async () => {
     await ensureClean();
     const shape = $('shape').value, captions = $('caps').checked ? captionList() : null, intro = titleCard('intro'), outro = titleCard('outro');
     // these edits are drawn onto every frame, so only a browser that can encode video can do them (the server only handles cuts)
-    const heavy = !!(captions?.length || intro || outro || shape !== 'original' || !plainEdit());
+    const heavy = !!(captions?.length || intro || outro || shape !== 'original' || zooms.length || !plainEdit());
     let blob = null, local = false, note = '';
     if ($('keep').checked) {
-      if (heavy) throw new Error('Keeping the original audio cannot be combined with speed changes, moved clips, several videos, captions, titles or cropping. Turn one off.');
+      if (heavy) throw new Error('Keeping the original audio cannot be combined with speed changes, moved clips, several videos, captions, titles zooms or cropping. Turn one off.');
       blob = await serverExport('Keeping the original audio needs the server.');
     } else {
       try {
         status('Exporting on this device…');
-        const fx = { shape, crop: $('crop').value / 100, captions, intro, outro };
+        const fx = { shape, crop: $('crop').value / 100, captions, intro, outro, zooms };
         const r = await exportLocally({ sources: sources.map((x) => ({ file: x.file, off: x.off })), voice: finalAudio(true), segs: segs().map((g) => ({ src: g.src, a: g.a - sources[g.src].off, b: g.b - sources[g.src].off, r: g.r })), fx, saveHandle: handle, onProgress: (p) => (btn.textContent = `Exporting ${Math.round(p * 100)}%`) });
         blob = r.blob; local = true;
         if (r.audioCodec !== 'aac') note = ' This browser cannot make AAC audio, so the voice is Opus. Most players handle it, but QuickTime and some older devices may not.';
@@ -1391,7 +1499,7 @@ updateUI();
   clips = sources.map((x) => ({ a: x.off, b: x.off + x.dur, r: 1 }));
   try { // the saved edit counts only if it still fits the videos
     const e = JSON.parse(localStorage.getItem('project') || 'null');
-    if (e && Math.abs(e.total - total()) < 0.05 && Array.isArray(e.clips) && e.clips.every((c) => c.b > c.a && c.a >= 0 && c.b <= total() + 0.01)) clips = e.clips;
+    if (e && Math.abs(e.total - total()) < 0.05 && Array.isArray(e.clips) && e.clips.every((c) => c.b > c.a && c.a >= 0 && c.b <= total() + 0.01)) { clips = e.clips; zooms = (e.zooms || []).filter((z) => z.b > z.a); }
   } catch {}
   const take = await kv.get('take');
   if (take?.samples?.length) { state.take = take; rebuildPeaks(take.samples); mixCache = null; }

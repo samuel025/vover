@@ -12,7 +12,7 @@
 <header class="bar">
   <a class="brand" href="/"><span class="dot"></span>Voiceover Studio</a>
   <div class="bar-actions">
-    <label class="btn ghost" for="file">Upload video</label>
+    <button id="newProject" class="btn ghost" title="Clear everything and start with a blank workspace">New project</button>
     <input id="file" type="file" accept="video/*" hidden />
     <button id="export" class="btn primary" disabled>Export MP4</button>
   </div>
@@ -28,6 +28,8 @@
       </div>
       <video id="video" playsinline muted preload="auto" hidden></video>
       <div class="caption" id="caption" hidden></div>
+      <div class="zdot a" id="zdotA" hidden title="Where the zoom starts"></div>
+      <div class="zdot b" id="zdotB" hidden title="Where the zoom ends"></div>
       <div class="countdown" id="countdown" hidden></div>
       <div class="badge" id="badge" hidden><i></i><span id="badgeText">REC</span></div>
     </div>
@@ -141,6 +143,12 @@
       <label class="row">Fade voice in / out
         <select id="fade"><option value="0">Off</option><option value="0.5">0.5 s</option><option value="1">1 s</option><option value="2">2 s</option></select>
       </label>
+      <label class="row">Voice tone
+        <select id="eq"><option value="off">Off</option><option value="podcast">Podcast voice</option><option value="warm">Warm</option><option value="bright">Bright and clear</option></select>
+      </label>
+      <label class="row">De-esser (harsh "s" sounds)
+        <select id="deess"><option value="off">Off</option><option value="light">Light</option><option value="strong">Strong</option></select>
+      </label>
       <button id="pauses" class="btn sm" disabled title="Cuts long silences out of the recording and the video">Remove long pauses</button>
       <div class="music">
         <label class="btn sm" for="musicFile">Add background music</label>
@@ -168,6 +176,13 @@
       <label class="row">Outro text <input id="outroText" type="text" placeholder="e.g. Thanks for watching" /></label>
       <label class="row">Outro length <select id="outroSec"><option value="0">None</option><option value="2">2 s</option><option value="3" selected>3 s</option><option value="4">4 s</option><option value="5">5 s</option></select></label>
       <small class="sub">Title cards are added when you export. Captions, cropping and speed changes need Chrome or Edge.</small>
+    </section>
+
+    <section class="card opts">
+      <h2>Zoom &amp; pan</h2>
+      <button id="zoomAdd" class="btn sm" disabled title="Zoom into part of the picture from the playhead">+ Add zoom at playhead</button>
+      <div id="zoomList" class="zooms"></div>
+      <small class="sub">Zooms are timed to the video, so they stay with it when you trim or move clips. They need Chrome or Edge to export.</small>
     </section>
 
     <section class="card opts keys">

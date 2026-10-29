@@ -182,3 +182,75 @@ const stamp = (t) => {
   return `${p(Math.floor(ms / 3600000))}:${p(Math.floor(ms / 60000) % 60)}:${p(Math.floor(ms / 1000) % 60)},${p(ms % 1000, 3)}`;
 };
 export const toSrt = (lines) => lines.map((l, i) => `${i + 1}\n${stamp(l.t0)} --> ${stamp(l.t1)}\n${l.text}\n`).join('\n');
+
+// ---------- voice presets: equaliser and de-esser ----------
+function biquad(type, f0, Q, gainDb, rate) {
+  const A = Math.pow(10, gainDb / 40), w0 = (2 * Math.PI * f0) / rate, cos = Math.cos(w0), sin = Math.sin(w0), alpha = sin / (2 * Q);
+  let b0, b1, b2, a0, a1, a2;
+  if (type === 'hp') { b0 = (1 + cos) / 2; b1 = -(1 + cos); b2 = (1 + cos) / 2; a0 = 1 + alpha; a1 = -2 * cos; a2 = 1 - alpha; }
+  else if (type === 'bp') { b0 = alpha; b1 = 0; b2 = -alpha; a0 = 1 + alpha; a1 = -2 * cos; a2 = 1 - alpha; }
+  else if (type === 'peak') { b0 = 1 + alpha * A; b1 = -2 * cos; b2 = 1 - alpha * A; a0 = 1 + alpha / A; a1 = -2 * cos; a2 = 1 - alpha / A; }
+  else {
+    const sq = 2 * Math.sqrt(A) * alpha;
+    if (type === 'lowshelf') { b0 = A * (A + 1 - (A - 1) * cos + sq); b1 = 2 * A * (A - 1 - (A + 1) * cos); b2 = A * (A + 1 - (A - 1) * cos - sq); a0 = A + 1 + (A - 1) * cos + sq; a1 = -2 * (A - 1 + (A + 1) * cos); a2 = A + 1 + (A - 1) * cos - sq; }
+    else { b0 = A * (A + 1 + (A - 1) * cos + sq); b1 = -2 * A * (A - 1 + (A + 1) * cos); b2 = A * (A + 1 + (A - 1) * cos - sq); a0 = A + 1 - (A - 1) * cos + sq; a1 = 2 * (A - 1 - (A + 1) * cos); a2 = A + 1 - (A - 1) * cos - sq; }
+  }
+  return [b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0];
+}
+function runFilter(x, [b0, b1, b2, a1, a2]) { // in place
+  let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+  for (let i = 0; i < x.length; i++) {
+    const v = x[i], y = b0 * v + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+    x2 = x1; x1 = v; y2 = y1; y1 = y; x[i] = y;
+  }
+}
+
+// [type, frequency Hz, Q, gain dB]
+export const EQ_PRESETS = {
+  podcast: [['hp', 80, 0.7, 0], ['peak', 250, 1, -2.5], ['peak', 3500, 1, 2.5], ['highshelf', 10000, 0.7, 2]], // clear and present
+  warm: [['hp', 70, 0.7, 0], ['lowshelf', 150, 0.7, 3], ['peak', 3000, 1, 1.5], ['highshelf', 9000, 0.7, -1.5]],  // fuller, softer top
+  bright: [['hp', 100, 0.7, 0], ['peak', 300, 1, -2], ['peak', 4500, 1, 3.5], ['highshelf', 9000, 0.7, 3]],       // crisp, for dull recordings
+};
+
+// The "s" and "t" sounds sit around 5 to 9 kHz. That band is turned down only while it is louder than usual, the rest is untouched.
+export function deess(x, rate, amount) {
+  const [ratio, floor, pct] = amount === 'strong' ? [6, 0.25, 0.5] : [3, 0.5, 0.65]; // how hard, the most it may turn down, and how much of the sibilance counts as normal
+  const band = Float32Array.from(x);
+  runFilter(band, biquad('bp', 6500, 1.2, 0, rate));
+  const att = 1 - Math.exp(-1 / (rate * 0.001)), rel = 1 - Math.exp(-1 / (rate * 0.04));
+  const env = new Float32Array(x.length);
+  let e = 0;
+  for (let i = 0; i < x.length; i++) { const a = Math.abs(band[i]); e += (a - e) * (a > e ? att : rel); env[i] = e; }
+  const sample = [];
+  for (let i = 0; i < env.length; i += 64) if (env[i] > 1e-4) sample.push(env[i]);
+  if (sample.length < 50) return x;
+  sample.sort((a, b) => a - b);
+  const thr = sample[Math.floor(sample.length * pct)]; // what is louder than this much sibilance is turned down
+  const out = new Float32Array(x.length);
+  for (let i = 0; i < x.length; i++) {
+    const gain = env[i] > thr ? Math.max(floor, Math.pow(thr / env[i], 1 - 1 / ratio)) : 1;
+    out[i] = x[i] - band[i] * (1 - gain);
+  }
+  return out;
+}
+
+export function enhanceVoice(x, rate, { eq, deess: amount }) {
+  let y = x;
+  if (EQ_PRESETS[eq]) { y = Float32Array.from(x); for (const [t, f, q, g] of EQ_PRESETS[eq]) runFilter(y, biquad(t, f, q, g, rate)); }
+  if (amount === 'light' || amount === 'strong') y = deess(y, rate, amount);
+  return y;
+}
+
+// ---------- zoom and pan ----------
+// A zoom is { a, b, k, x1, y1, x2, y2 }: from time a to b the picture is zoomed to k times, looking at (x1, y1) and sliding
+// to (x2, y2). Positions are fractions of the picture. It eases in and out over the first and last half second.
+// Returns the visible window as fractions of the picture ({ k, x, y, w } with x, y the top-left), or null when no zoom is on.
+export function zoomState(zooms, g) {
+  const z = zooms.find((q) => g >= q.a && g < q.b);
+  if (!z) return null;
+  const len = z.b - z.a, ramp = Math.max(0.01, Math.min(0.5, len / 3)), t = g - z.a;
+  const u = Math.min(1, t / ramp, (z.b - g) / ramp), f = u * u * (3 - 2 * u);
+  const k = 1 + (z.k - 1) * f, w = 1 / k, p = len > 0 ? t / len : 0;
+  const cx = z.x1 + (z.x2 - z.x1) * p, cy = z.y1 + (z.y2 - z.y1) * p;
+  return { k, w, x: Math.max(0, Math.min(1 - w, cx - w / 2)), y: Math.max(0, Math.min(1 - w, cy - w / 2)) };
+}
