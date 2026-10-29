@@ -2,7 +2,8 @@ import { denoise, normaliseGain, stretch, mixMusic, findPauses, buildCaptions, t
 import { exportLocally, pickSaveTarget, Unsupported } from './export.js';
 
 const $ = (id) => document.getElementById(id);
-const video = $('video'), scriptEl = $('script'), prompter = $('prompter'), wordsEl = $('words');
+let video = $('video'), spare = $('video2');
+const scriptEl = $('script'), prompter = $('prompter'), wordsEl = $('words');
 const timeline = $('timeline'), canvas = $('wave');
 
 // take.samples holds the voice on the video's own timeline: sample 0 is video time 0.
@@ -96,7 +97,7 @@ function updateRecLabel() {
 // ---------- video upload ----------
 // The video stays on this device. It is only sent to the server if a server export is needed (see export below).
 // a file the browser cannot play (some MKV or HEVC videos) would otherwise just sit there looking broken
-video.onerror = () => { if (state.file && !jumping) status('This browser cannot play that video. Try an MP4 (H.264) or WebM file.'); };
+for (const el of [video, spare]) el.onerror = () => { if (state.file && !jumping && el === video) status('This browser cannot play that video. Try an MP4 (H.264) or WebM file.'); };
 $('file').onchange = (e) => loadVideo(e.target.files[0]);
 
 const wrap = $('videoWrap');
@@ -154,22 +155,39 @@ function probe(file) {
     v.src = url;
   });
 }
-function loadSource(i) {
-  if (i === loaded) return Promise.resolve();
-  loaded = i;
-  return new Promise((res) => {
-    const done = () => { video.removeEventListener('loadeddata', done); res(); };
-    video.addEventListener('loadeddata', done);
-    video.src = sources[i].url + '#t=0.001'; // starting a hair in makes the browser paint the first frame instead of a blank player
+// Two players take turns. The one on screen plays; the other loads the next video and waits on the exact frame needed, then they swap
+// in one step, so changing from one video to another never shows a blank player or the start of the video.
+const prep = { i: -1, t: 0, p: null };
+function prepare(i, g) {
+  const t = Math.max(0, g - sources[i].off);
+  if (prep.i === i && Math.abs(prep.t - t) < 0.05 && prep.p) return prep.p; // already on its way
+  prep.i = i; prep.t = t;
+  const el = spare;
+  prep.p = new Promise((res) => {
+    const place = () => { if (Math.abs(el.currentTime - t) > 0.04) { el.addEventListener('seeked', () => res(), { once: true }); el.currentTime = t; } else res(); };
+    if (el.dataset.i === String(i) && el.readyState >= 2) place(); // this player already holds that video
+    else { el.dataset.i = String(i); el.addEventListener('loadeddata', place, { once: true }); el.src = sources[i].url + '#t=' + t; } // the #t starts it at the right moment
   });
+  return prep.p;
+}
+function swapPlayers(i) {
+  const old = video;
+  video = spare; spare = old;
+  video.id = 'video'; spare.id = 'video2';
+  video.hidden = false; video.muted = old.muted;
+  video.style.visibility = ''; spare.style.visibility = 'hidden';
+  spare.pause(); spare.style.transform = '';
+  loaded = i; prep.i = -1; prep.p = null;
 }
 // moves the playhead to project time g, switching to another video file when it lives in one
-function gSeek(g) {
-  if (!sources.length) return Promise.resolve();
+async function gSeek(g) {
+  if (!sources.length) return;
   g = Math.max(0, Math.min(total(), g));
   const i = srcOf(g), token = ++seekToken;
-  if (i === loaded) { video.currentTime = g - sources[i].off; return Promise.resolve(); }
-  return loadSource(i).then(() => { if (token === seekToken) video.currentTime = g - sources[i].off; });
+  if (i === loaded) { video.currentTime = g - sources[i].off; return; }
+  await prepare(i, g);
+  if (token !== seekToken || prep.i !== i) return;
+  swapPlayers(i);
 }
 
 const touched = () => { editVer++; abCache = null; };
@@ -286,7 +304,7 @@ function saveProject() { try { localStorage.setItem('project', JSON.stringify({ 
 
 async function showProject(msg) {
   state.file = sources[0]?.file || null;
-  video.hidden = !sources.length; $('empty').hidden = !!sources.length;
+  video.hidden = spare.hidden = !sources.length; $('empty').hidden = !!sources.length;
   await gSeek(clips.length ? clips[0].a : 0);
   touched(); layoutWords(); renderCuts(); renderTakes(); renderZooms(); updateUI();
   if (msg) status(msg);
@@ -330,7 +348,8 @@ function blankWorkspace() {
   stopAll();
   newProject();
   state.file = null; state.serverId = null;
-  video.removeAttribute('src'); video.load();
+  for (const el of [video, spare]) { el.removeAttribute('src'); el.removeAttribute('data-i'); el.load(); }
+  prep.i = -1; prep.p = null;
   scriptEl.value = ''; try { localStorage.removeItem('script'); } catch {}
   music = null; kv.del('music'); $('musicName').textContent = ''; $('musicOpts').hidden = true;
   renderSections(); drawWave();
@@ -1010,7 +1029,7 @@ async function jumpTo(g) {
     if ((state.playing || recLive) && video.paused) await video.play().catch(() => {});
   } finally { jumping = false; }
 }
-video.onended = () => { if (state.playing || (state.recording && !state.recPaused)) tick(); };
+for (const el of [video, spare]) el.onended = () => { if (el === video && (state.playing || (state.recording && !state.recPaused))) tick(); };
 
 function tick() {
   const t = gNow();
@@ -1042,6 +1061,8 @@ function tick() {
     if (k < 0) jumpTo(snapG(t));
     else {
       playK = k;
+      const ahead = clips[k + 1]; // getting the next video ready in the other player before it is needed
+      if (ahead && srcOf(ahead.a) !== loaded && t > clips[k].b - 3) prepare(srcOf(ahead.a), ahead.a);
       if (t >= clips[k].b - (recLive ? 0 : 0.03)) {
         const next = clips[k + 1];
         if (!next) { if (recLive) stopRecording(); else stopPlay(); }

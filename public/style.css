@@ -221,3 +221,7 @@ body.app .stage>*:not(.video-wrap){flex:none}
 .tscroll{position:relative;height:8px;border-radius:4px;background:var(--hover);margin-top:-4px;cursor:pointer}
 .tscroll i{position:absolute;top:0;bottom:0;border-radius:4px;background:#b8b8b8;cursor:grab}
 .tscroll i:hover{background:#999}
+
+/* two players: the next video is loaded in the hidden one and swapped in, so a change of video never flashes */
+.video-wrap video{position:absolute;inset:0}
+#video2{visibility:hidden}
