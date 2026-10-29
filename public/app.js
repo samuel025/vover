@@ -528,6 +528,12 @@ function placeDots() {
   $('zdotB').hidden = !zsel.pan;
 }
 function zoomChanged() { touched(); saveProject(); renderCuts(); }
+// A zoom eases in and out, so at its first or last frame the picture looks normal. When something about a zoom changes the
+// playhead moves to the middle of it, where the full effect shows in the player.
+function showZoom(z) {
+  const ramp = Math.min(0.5, (z.b - z.a) / 3), g = gNow();
+  if (g < z.a + ramp || g >= z.b - ramp) seekTo(z.a + (z.b - z.a) / 2);
+}
 function renderZooms() {
   const el = $('zoomList');
   $('zoomAdd').disabled = !state.file || (state.recording && !state.recPaused);
@@ -549,14 +555,14 @@ $('zoomAdd').onclick = () => {
   checkpoint();
   zsel = { a: g, b: Math.min(g + 3, next), k: 2, x1: 0.5, y1: 0.5, x2: 0.5, y2: 0.5, pan: false };
   zooms.push(zsel); zooms.sort((p, q) => p.a - q.a); pick = null;
-  zoomChanged(); renderZooms();
-  status('Zoom added. Press "Choose where to zoom", then click the spot on the video.');
+  zoomChanged(); renderZooms(); showZoom(zsel);
+  status('Zoom added, shown in the player. Press "Choose where to zoom", then click the spot on the video.');
 };
 $('zoomList').onclick = (e) => {
   const b = e.target.closest('[data-a]'), row = e.target.closest('.zoom');
   if (!b || !row) return;
   const z = zooms[+row.dataset.i], a = b.dataset.a;
-  if (a === 'select') { zsel = z; pick = null; seekTo(Math.min(z.b - 0.05, z.a + Math.min(1, (z.b - z.a) / 2))); }
+  if (a === 'select') { zsel = z; pick = null; showZoom(z); }
   else if (a === 'del') { checkpoint(); zooms = zooms.filter((q) => q !== z); if (zsel === z) { zsel = null; pick = null; } zoomChanged(); }
   else if (a === 'start' || a === 'end') { zsel = z; pick = pick === a ? null : a; if (pick) status('Click the spot on the video.'); }
   else if (a === 'nopan') { checkpoint(); z.pan = false; z.x2 = z.x1; z.y2 = z.y1; zoomChanged(); }
@@ -567,6 +573,7 @@ $('zoomList').oninput = (e) => {
   const f = e.target.dataset.f;
   if (!f || !zsel) return;
   if (!zoomDirty) { checkpoint(); zoomDirty = true; }
+  showZoom(zsel);
   if (f === 'k') zsel.k = +e.target.value;
   else { const next = Math.min(total(), ...zooms.filter((z) => z.a > zsel.a).map((z) => z.a)); zsel.b = Math.min(zsel.a + +e.target.value, next); }
   const meta = $('zoomList').querySelector('.zoom.sel .meta');
@@ -583,7 +590,7 @@ wrap.addEventListener('click', (e) => {
   checkpoint();
   if (pick === 'start') { zsel.x1 = x; zsel.y1 = y; if (!zsel.pan) { zsel.x2 = x; zsel.y2 = y; } }
   else { zsel.x2 = x; zsel.y2 = y; zsel.pan = true; }
-  pick = null; zoomChanged(); renderZooms();
+  pick = null; zoomChanged(); renderZooms(); showZoom(zsel);
   status(zsel.pan ? 'Done. The zoom slides from the first spot to the second.' : 'Done. Play it to see the zoom.');
 });
 
