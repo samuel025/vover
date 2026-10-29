@@ -56,39 +56,57 @@ function drawCaption(g, W, H, text) {
   });
 }
 
-// segs: the kept parts of the video, [{ a, b, r }] in seconds with their speed. voice: finished audio, already edited and
-// padded for any title cards. fx: { shape, crop, captions, intro: { text, sec }, outro: { text, sec } }.
-export async function exportLocally({ file, voice, segs, fx = {}, saveHandle, onProgress }) {
+// sources: [{ file, off }] the videos (off is where each starts in project time, which is how captions are timed).
+// segs: the clips in timeline order, [{ src, a, b, r }] with a and b in seconds inside that video and r the speed.
+// voice: finished audio, already edited and padded for any title cards.
+// fx: { shape, crop, captions, intro: { text, sec }, outro: { text, sec } } (caption times are in project time).
+export async function exportLocally({ sources, voice, segs, fx = {}, saveHandle, onProgress }) {
   if (!('AudioEncoder' in window)) throw new Unsupported('This browser cannot encode audio.');
-  const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
-  const video = await input.getPrimaryVideoTrack();
-  if (!video) throw new Unsupported('No video track found.');
+  if (!segs.length) throw new Unsupported('There is nothing left in the timeline to export.');
+
+  // open every video that is used
+  const tracks = {};
+  for (const k of new Set(segs.map((x) => x.src))) {
+    const input = new Input({ source: new BlobSource(sources[k].file), formats: ALL_FORMATS });
+    const video = await input.getPrimaryVideoTrack();
+    if (!video) throw new Unsupported('No video track found.');
+    tracks[k] = { video, duration: await video.computeDuration(), sink: null };
+  }
+  const first = tracks[segs[0].src];
+  const multi = Object.keys(tracks).length > 1;
 
   const format = new Mp4OutputFormat({ fastStart: saveHandle ? false : 'in-memory' });
-  const vcodec = await video.getCodec();
+  const vcodec = await first.video.getCodec();
   if (!vcodec || !MP4_SAFE.includes(vcodec) || !format.getSupportedVideoCodecs().includes(vcodec)) throw new Unsupported(`MP4 cannot hold ${vcodec || 'this'} video without converting it.`);
-  const decoderConfig = await video.getDecoderConfig();
-  const fullDuration = await video.computeDuration();
+  const decoderConfig = await first.video.getDecoderConfig();
 
   const intro = fx.intro?.sec > 0 ? fx.intro : null, outro = fx.outro?.sec > 0 ? fx.outro : null;
   const shape = SHAPES[fx.shape] ? fx.shape : 'original';
   const look = !!(fx.captions?.length || intro || outro || shape !== 'original'); // anything that has to be drawn onto the frames
-  const same = segs.length === 1 && segs[0].r === 1 && segs[0].a < 1e-3 && Math.abs(segs[0].b - fullDuration) < 0.02;
-  const mode = look ? 'canvas' : same ? 'copy' : 'samples';
-  const content = segs.reduce((n, s) => n + (s.b - s.a) / s.r, 0);
+  const same = !multi && segs.length === 1 && segs[0].r === 1 && segs[0].a < 1e-3 && Math.abs(segs[0].b - first.duration) < 0.02;
+  const mode = look || multi ? 'canvas' : same ? 'copy' : 'samples';
+  const content = segs.reduce((n, g) => n + (g.b - g.a) / g.r, 0);
   const lead = intro?.sec || 0, total = lead + content + (outro?.sec || 0);
 
-  // output picture size; canvas mode crops to the chosen shape
-  const dw = video.displayWidth, dh = video.displayHeight;
-  const crop = { sx: 0, sy: 0, sw: dw, sh: dh };
+  // output picture size comes from the first video; canvas mode crops or fits every frame into it
+  const dw = first.video.displayWidth, dh = first.video.displayHeight;
   let outW = even(dw), outH = even(dh);
   if (shape !== 'original') {
     const A = SHAPES[shape];
-    if (A < dw / dh) { crop.sw = dh * A; crop.sx = (dw - crop.sw) * (fx.crop ?? 0.5); }
-    else { crop.sh = dw / A; crop.sy = (dh - crop.sh) / 2; }
-    outH = even(Math.min(crop.sh, 1920)); outW = even(outH * A);
+    const ch = A < dw / dh ? dh : dw / A;
+    outH = even(Math.min(ch, 1920)); outW = even(outH * A);
   }
-  const encW = mode === 'canvas' ? outW : await video.getCodedWidth(), encH = mode === 'canvas' ? outH : await video.getCodedHeight();
+  // where a frame of size (w, h) is taken from and drawn to
+  const place = (w, h) => {
+    if (shape !== 'original') {
+      const A = outW / outH, p = { dx: 0, dy: 0, dW: outW, dH: outH, sx: 0, sy: 0, sw: w, sh: h };
+      if (A < w / h) { p.sw = h * A; p.sx = (w - p.sw) * (fx.crop ?? 0.5); } else { p.sh = w / A; p.sy = (h - p.sh) / 2; }
+      return p;
+    }
+    const k = Math.min(outW / w, outH / h), dW = w * k, dH = h * k;
+    return { sx: 0, sy: 0, sw: w, sh: h, dx: (outW - dW) / 2, dy: (outH - dH) / 2, dW, dH };
+  };
+  const encW = mode === 'canvas' ? outW : await first.video.getCodedWidth(), encH = mode === 'canvas' ? outH : await first.video.getCodedHeight();
   const bitrate = Math.max(2e6, encW * encH * 4);
 
   let outCodec = vcodec;
@@ -115,36 +133,40 @@ export async function exportLocally({ file, voice, segs, fx = {}, saveHandle, on
     : mode === 'canvas' ? new CanvasSource(canvas, { codec: outCodec, bitrate })
     : new VideoSampleSource({ codec: outCodec, bitrate });
   const asource = new AudioBufferSource({ codec: acodec, bitrate: 192_000 });
-  output.addVideoTrack(vsource, mode === 'canvas' ? {} : { rotation: video.rotation });
+  output.addVideoTrack(vsource, mode === 'canvas' ? {} : { rotation: first.video.rotation });
   output.addAudioTrack(asource);
   await output.start();
 
   const copyVideo = async () => {
-    let first = true;
-    for await (const packet of new EncodedPacketSink(video).packets()) {
-      await vsource.add(packet, first ? { decoderConfig } : undefined);
-      first = false;
-      onProgress?.(Math.min(1, packet.timestamp / fullDuration));
+    let firstPacket = true;
+    for await (const packet of new EncodedPacketSink(first.video).packets()) {
+      await vsource.add(packet, firstPacket ? { decoderConfig } : undefined);
+      firstPacket = false;
+      onProgress?.(Math.min(1, packet.timestamp / first.duration));
     }
     vsource.close();
   };
 
   const encodeVideo = async () => {
-    const sink = new VideoSampleSink(video);
     const caps = fx.captions || [];
-    let ci = 0, outAt = lead;
+    let outAt = lead, ci = 0;
     const card = async (text, from, sec) => {
       drawTitle(g, outW, outH, text);
       for (let t = 0; t < sec; t += 0.25) await vsource.add(from + t, Math.min(0.25, sec - t));
     };
     if (intro) await card(intro.text, 0, intro.sec);
-    for (const { a, b, r } of segs) {
-      for await (const s of sink.samples(a, b)) {
+    for (const seg of segs) {
+      const tr = tracks[seg.src], { a, b, r } = seg, off = sources[seg.src].off;
+      tr.sink ||= new VideoSampleSink(tr.video);
+      const pl = mode === 'canvas' ? place(tr.video.displayWidth, tr.video.displayHeight) : null;
+      for await (const s of tr.sink.samples(a, b)) {
         const rel = Math.max(0, s.timestamp - a) / r;
         if (mode === 'canvas') {
-          s.draw(g, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, outW, outH);
-          while (ci < caps.length && caps[ci].t1 <= s.timestamp) ci++; // captions are in video time, which only moves forward
-          if (caps[ci] && s.timestamp >= caps[ci].t0) drawCaption(g, outW, outH, caps[ci].text);
+          if (multi || shape === 'original') { g.fillStyle = '#000'; g.fillRect(0, 0, outW, outH); }
+          s.draw(g, pl.sx, pl.sy, pl.sw, pl.sh, pl.dx, pl.dy, pl.dW, pl.dH);
+          const gt = off + s.timestamp; // captions are timed in project time, and clips can be played in any order
+          if (!(caps[ci] && gt >= caps[ci].t0 && gt < caps[ci].t1)) ci = caps.findIndex((c) => gt >= c.t0 && gt < c.t1);
+          if (ci >= 0 && caps[ci]) drawCaption(g, outW, outH, caps[ci].text);
           await vsource.add(outAt + rel, Math.max(s.duration / r, 0.001));
         } else {
           s.setTimestamp(outAt + rel); s.setDuration(s.duration / r);

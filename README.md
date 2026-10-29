@@ -9,10 +9,14 @@ Record a voiceover over any video in one browser tab. Upload a video, paste your
 - Recordings are saved as you go, so a crashed or closed tab can be recovered, plus a live warning when the mic is too quiet or clipping
 - Cut parts out of the video: press Cut (X) at the start, move the playhead, press it again at the end. Cuts are skipped in playback and removed from the export (the picture is re-encoded when there are cuts), and each one can be restored
 - Save your recording as a WAV file and import it onto any video later (or a new one), then carry on recording from where it ends
+- A clip strip above the waveform: drag a clip's edge to trim it, drag a clip to move it, click to select it
+- Combine several videos on one timeline and narrate across them (+ Add video, or drop more videos on the page)
+- Takes: every finished recording is kept in a list you can listen to, star and switch between
+- Redo line (L): while recording, jump back to the start of the sentence you are on and read it again
 - Split the video into clips (B), delete a clip, change one clip's speed (voice speed follows, pitch kept), undo and redo (Ctrl+Z)
 - Audio polish: background noise reduction, volume evening, voice fades, background music that dips while you speak, one click to cut long pauses
 - Captions built from your script (shown in the preview, burned into the export, or downloaded as .srt), intro and outro title cards, vertical or square crop
-- Splitting, speed, captions, titles and cropping are done in the browser only (Chrome or Edge); the server fallback handles cuts but nothing else
+- Splitting, moving clips, several videos, speed, captions, titles and cropping are done in the browser only (Chrome or Edge); the server fallback handles plain cuts of a single video but nothing else
 - Waveform timeline you can scrub, playback speed, volume and sync nudge
 - Your video, script and take survive a page refresh
 - Export runs **in your browser** for most MP4 and MOV files: the video is never uploaded

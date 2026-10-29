@@ -34,9 +34,9 @@
 
     <div class="times"><span id="cur">0:00.0</span><span id="takeLen" class="sub"></span><span id="dur">0:00.0</span></div>
     <div class="timeline disabled" id="timeline">
+      <div class="strip" id="strip"></div>
       <canvas id="wave"></canvas>
       <div class="marks" id="marks"></div>
-      <div class="clipsel" id="clipSel"></div>
       <div class="cuts" id="cuts"></div>
       <div class="playhead" id="playhead"><b></b></div>
     </div>
@@ -47,6 +47,8 @@
       <span class="gap"></span>
       <button id="split" class="btn sm" title="Split the video at the playhead (B)" disabled>Split</button>
       <button id="delClip" class="btn sm" title="Delete the clip under the playhead (Delete)" disabled>Delete clip</button>
+      <label class="btn sm" for="addFile" title="Add another video to the end of the timeline">+ Add video</label>
+      <input id="addFile" type="file" accept="video/*" hidden />
       <label class="chk">Clip speed
         <select id="clipSpeed" disabled>
           <option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option>
@@ -72,6 +74,7 @@
       <div class="group">
         <button id="rec" class="btn rec" title="Record / stop (R)" disabled><span class="rdot"></span><span id="recLabel">Record</span></button>
         <button id="pauseRec" class="btn" hidden>Pause</button>
+        <button id="redoLine" class="btn" hidden title="Go back to the start of this sentence and read it again (L)">↺ Redo line</button>
         <button id="cut" class="btn" title="Cut out part of the video: press at the start, move, press again at the end (X)" disabled>✂ Cut</button>
         <button id="trim" class="btn" title="Cut the take at the playhead (T)" disabled>Trim end here</button>
         <button id="clear" class="btn ghost" disabled>Discard take</button>
@@ -101,7 +104,7 @@
         <div id="words" class="words"></div>
         <div class="hud"><span id="hudSec"></span><span id="hudTime"></span><span id="hudState"></span></div>
         <div class="hud-count" id="hudCount" hidden></div>
-        <div class="hud-keys">R record · Space pause · ↑↓ speed · M next section · S retake section · F exit</div>
+        <div class="hud-keys">R record · Space pause · L redo line · ↑↓ speed · M next section · S retake section · F exit</div>
       </div>
       <div id="sections" class="sections" hidden></div>
       <div class="speed">
@@ -124,6 +127,11 @@
       <label class="row">Mic <select id="mic"></select></label>
       <div class="meter"><i id="level"></i></div>
       <small id="levelHint" class="sub"></small>
+    </section>
+
+    <section class="card opts">
+      <h2>Takes</h2>
+      <div id="takes" class="takes"></div>
     </section>
 
     <section class="card opts">
@@ -170,7 +178,7 @@
         <span><kbd>↑</kbd><kbd>↓</kbd> scroll speed</span><span><kbd>←</kbd><kbd>→</kbd> seek 5s</span>
         <span><kbd>[</kbd><kbd>]</kbd> section back · next</span><span><kbd>M</kbd> next section starts now</span>
         <span><kbd>S</kbd> retake this section</span><span><kbd>X</kbd> cut start · end</span>
-        <span><kbd>Esc</kbd> cancel a cut</span><span><kbd>B</kbd> split at playhead</span>
+        <span><kbd>Esc</kbd> cancel a cut</span><span><kbd>B</kbd> split at playhead</span><span><kbd>L</kbd> redo this line</span>
         <span><kbd>Del</kbd> delete clip</span><span><kbd>Ctrl</kbd><kbd>Z</kbd> undo · <kbd>Shift</kbd> redo</span>
       </div>
     </section>
