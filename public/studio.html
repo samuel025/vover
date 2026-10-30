@@ -53,7 +53,7 @@
       <button id="undo" class="btn sm" title="Undo (Ctrl+Z)" disabled>↶ Undo</button>
       <button id="redo" class="btn sm" title="Redo (Ctrl+Shift+Z)" disabled>↷ Redo</button>
       <label class="chk" title="Choose what cuts, splits, deletes and moves change: the video and voice together, just the video, or just the voice (cuts leave silence and the voice can be dragged)">Edits change
-        <select id="editMode"><option value="both">video and voice</option><option value="video">video only</option><option value="voice">voice only</option></select>
+        <select id="editMode"><option value="both">video + voice (closes the gap)</option><option value="video">video only</option><option value="voice">voice only (keeps the gap)</option></select>
       </label>
       <span class="gap"></span>
       <button id="split" class="btn sm" title="Split the video at the playhead (B)" disabled>Split</button>

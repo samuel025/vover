@@ -473,7 +473,7 @@ function blankVoice(lo, hi) {
 function voiceCut(lo, hi) {
   if (!hasTake()) return status('There is no recording yet.');
   checkpoint(); blankVoice(lo, hi); vsp = [...vsp, lo, hi].sort((a, b) => a - b); asel = null; afterVoiceEdit();
-  status(`Cut ${(hi - lo).toFixed(1)}s out of the voice. The space stays, drag the pieces to close it up. Undo brings it back.`);
+  status(`Cut ${(hi - lo).toFixed(1)}s out of the voice. The space stays until you drag a piece over it, or move the playhead into it and record to fill it. Undo brings it back.`);
 }
 function voiceSplit(t) {
   const p = pieceAt(t);
@@ -626,7 +626,7 @@ function cutPress() {
   for (const [a, b] of spansForEdited(lo, hi)) removeSpan(a, b);
   commitEdit();
   seekTo(toSrc(lo));
-  status(`Removed ${(hi - lo).toFixed(1)}s of video. It is skipped in playback and left out of the export.${voiceFree ? '' : ''}${overrunNote()}`);
+  status(`Removed ${(hi - lo).toFixed(1)}s of video. It is skipped in playback and left out of the export.${voiceFree ? '' : ' The voice under it was removed too, so the rest moved up. To cut only the voice and keep the space, set Edits change to "voice only" and undo (Ctrl+Z) first.'}${overrunNote()}`);
 }
 function cancelCut() { if (cutStart !== null) { cutStart = null; renderCuts(); status('Cut cancelled.'); } }
 $('cut').onclick = cutPress;
