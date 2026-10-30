@@ -1157,11 +1157,16 @@ async function jumpTo(g) {
   jumping = true;
   const recLive = state.recording && !state.recPaused;
   try {
-    if (recLive) commitCapture();
+    // The microphone must not miss anything while the next video loads. Where the voice carries straight on (one clip into the
+    // next) the capture just keeps running; where the edit skips ahead, the new capture starts at once, before the video is ready.
+    if (recLive && Math.abs((capStart + chunkLen) / ctx.sampleRate - vt(g)) > 0.1) { commitCapture(); beginCapture(true, vt(g)); }
     await gSeek(g);
-    playK = clipIndexAt(g);
+    if (recLive) { // the voice kept running during the switch, so move the video on to where the voice has got to
+      const want = vInv((capStart + chunkLen) / ctx.sampleRate);
+      if (want - gNow() > 0.04 && clipIndexAt(want) === clipIndexAt(gNow())) await gSeek(want);
+    }
+    playK = clipIndexAt(gNow());
     if (state.playing) startVoice();
-    if (recLive) beginCapture(true);
     if ((state.playing || recLive) && video.paused) await video.play().catch(() => {});
   } finally { jumping = false; }
 }
@@ -1299,10 +1304,10 @@ function splice(existing, start, end, pieces) {
 }
 const rangeEndIdx = () => (state.range ? Math.round(vt(state.range.end) * ctx.sampleRate) : null);
 
-function beginCapture(quiet = false) {
+function beginCapture(quiet = false, at = null) {
   if (!quiet) checkpoint();
   video.playbackRate = 1; // the voice is recorded in real time, so the video must not run faster or slower
-  capStart = Math.round(vt(gNow()) * ctx.sampleRate);
+  capStart = Math.round((at ?? vt(gNow())) * ctx.sampleRate);
   const have = hasTake() ? state.take.samples : new Float32Array(0);
   base = have; // splice() copies from it, the take itself is untouched until the capture is committed
   const r = state.range;
