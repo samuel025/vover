@@ -225,3 +225,11 @@ body.app .stage>*:not(.video-wrap){flex:none}
 /* two players: the next video is loaded in the hidden one and swapped in, so a change of video never flashes */
 .video-wrap video{position:absolute;inset:0}
 #video2{visibility:hidden}
+
+/* voice pieces: lie over the waveform when edits change only the voice */
+.alane{position:absolute;left:0;right:0;top:30px;bottom:14px;pointer-events:none}
+.ablk{position:absolute;top:2px;bottom:2px;border:1.5px solid #c8601f;background:#f08a4b22;border-radius:6px;box-sizing:border-box;pointer-events:auto;cursor:grab;min-width:3px}
+.ablk:hover{background:#f08a4b3d}
+.ablk.sel{border-color:var(--text);background:#f08a4b44}
+.ablk.dragging{cursor:grabbing;background:#f08a4b55}
+.alane .drop{background:#2f7cf6}

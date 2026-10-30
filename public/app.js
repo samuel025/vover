@@ -13,7 +13,7 @@ let base = new Float32Array(0), chunks = [], chunkLen = 0, capturing = false;
 let spans = [], lastNow = -1, lastSec = -1;
 let speed = 1;
 let capStart = 0, draft = null;
-let cutStart = null, editVer = 0, history = [], future = [], music = null, musicId = 0, takes = [], playK = -1, voiceFree = false, zooms = [], zsel = null, pick = null, zoomDirty = false;
+let cutStart = null, editVer = 0, history = [], future = [], music = null, musicId = 0, takes = [], playK = -1, voiceFree = false, zooms = [], zsel = null, pick = null, zoomDirty = false, vsp = [], asel = null, editVoice = false;
 let cleaned = null, cleaning = null, finalCache = {}, abCache = null, lastClipKey = '', lastCap = null;
 
 const B = 1024; // samples per waveform bucket
@@ -70,6 +70,7 @@ function updateUI() {
   $('undo').disabled = !idle || !history.length; $('redo').disabled = !idle || !future.length;
   const gone = v && !!total() && editedLen() < 0.05; // every clip was deleted
   for (const k of ['split', 'clipSpeed', 'delClip']) $(k).disabled = !idle || gone;
+  $('split').textContent = editVoice ? 'Split voice' : 'Split'; $('delClip').textContent = editVoice ? 'Delete voice' : 'Delete clip'; $('clipSpeed').disabled ||= editVoice;
   wrap.classList.toggle('gone', gone);
   if (gone) for (const k of ['cut', 'rec', 'play', 'toStart', 'back', 'fwd']) $(k).disabled = true;
   $('pauses').disabled = !idle || !hasTake() || voiceFree;
@@ -289,7 +290,7 @@ $('tscroll').onpointerup = $('tscroll').onpointercancel = () => { barDrag = null
 
 function newProject() {
   discardTake();
-  view = { s: 0, len: 0 }; voiceFree = false; $('editMode').value = 'both'; sources = []; clips = []; zooms = []; zsel = null; pick = null; loaded = -1; takes = []; cutStart = null; history = []; future = []; touched();
+  view = { s: 0, len: 0 }; voiceFree = false; vsp = []; asel = null; syncMode(); sources = []; clips = []; zooms = []; zsel = null; pick = null; loaded = -1; takes = []; cutStart = null; history = []; future = []; touched();
   try { localStorage.removeItem('project'); localStorage.removeItem('marks'); } catch {}
   kv.get('sources').then((m) => { for (const x of m || []) kv.del('src-' + x.id); kv.del('video'); }).then(() => kv.del('takes'));
 }
@@ -300,7 +301,7 @@ async function addSource(file, id) {
   return s;
 }
 const saveSources = () => kv.set('sources', sources.map(({ id, name, dur }) => ({ id, name, dur })));
-function saveProject() { try { localStorage.setItem('project', JSON.stringify({ total: total(), clips, zooms, voiceFree })); } catch {} }
+function saveProject() { try { localStorage.setItem('project', JSON.stringify({ total: total(), clips, zooms, voiceFree, vsp })); } catch {} }
 
 async function showProject(msg) {
   state.file = sources[0]?.file || null;
@@ -359,10 +360,10 @@ $('newProject').onclick = blankWorkspace;
 $('addFile').onchange = (e) => { addVideo(e.target.files[0]); e.target.value = ''; };
 
 // undo / redo: a snapshot is the clips, the videos and the recorded voice (the voice arrays are never changed in place, so keeping them is cheap)
-const snap = () => ({ clips: JSON.stringify(clips), zooms: JSON.stringify(zooms), voiceFree, sources: sources.slice(), take: state.take ? { samples: state.take.samples, rate: state.take.rate } : null });
+const snap = () => ({ clips: JSON.stringify(clips), zooms: JSON.stringify(zooms), voiceFree, vsp: vsp.slice(), sources: sources.slice(), take: state.take ? { samples: state.take.samples, rate: state.take.rate } : null });
 function checkpoint() { history.push(snap()); if (history.length > 15) history.shift(); future = []; updateUI(); }
 function applySnap(sn) {
-  clips = JSON.parse(sn.clips); zooms = JSON.parse(sn.zooms); voiceFree = !!sn.voiceFree; $('editMode').value = voiceFree ? 'video' : 'both'; zsel = null; pick = null; sources = sn.sources.slice(); cutStart = null;
+  clips = JSON.parse(sn.clips); zooms = JSON.parse(sn.zooms); voiceFree = !!sn.voiceFree; vsp = (sn.vsp || []).slice(); asel = null; syncMode(); zsel = null; pick = null; sources = sn.sources.slice(); cutStart = null;
   if (loaded >= sources.length) loaded = -1;
   state.take = sn.take ? { ...sn.take } : null; mixCache = null;
   rebuildPeaks(state.take?.samples || new Float32Array(0));
@@ -420,16 +421,139 @@ function unbakeVoice() {
   }
   setTakeSamples(out, rate);
 }
+// the selector shows where edits go: video and voice together, only the video, or only the voice
+function syncMode() { if (!voiceFree) editVoice = false; $('editMode').value = !voiceFree ? 'both' : editVoice ? 'voice' : 'video'; }
 $('editMode').onchange = (e) => {
-  const free = e.target.value === 'video';
-  if (free === voiceFree) return;
-  if (!canSeek()) { e.target.value = voiceFree ? 'video' : 'both'; return status('Stop recording first.'); }
-  stopPlay(); archiveTake(); checkpoint();
-  if (free) bakeVoice(); else unbakeVoice();
-  voiceFree = free;
+  const mode = e.target.value, free = mode !== 'both';
+  if (!canSeek()) { syncMode(); return status('Stop recording first.'); }
+  if (free !== voiceFree) {
+    stopPlay(); archiveTake(); checkpoint();
+    if (free) bakeVoice(); else unbakeVoice();
+    voiceFree = free;
+  }
+  editVoice = mode === 'voice'; asel = null;
   saveProject(); touched(); renderCuts(); renderSections(); drawWave(); renderTakes(); updateUI();
-  status(free ? 'Edits now change only the video. Your voice stays exactly where it is on the timeline.' : 'Edits change the video and the voice together again. Your voice was moved back to match the video.');
+  status(editVoice ? 'Edits now change only the voice. Cut leaves silence, and you can drag the voice pieces on the timeline.'
+    : free ? 'Edits now change only the video. Your voice stays exactly where it is on the timeline.' : 'Edits change the video and the voice together again. Your voice was moved back to match the video.');
 };
+
+// ---------- editing only the voice ----------
+// The voice is a stretch of samples; the pieces are the parts of it that have sound, separated by silence or by a split.
+// Cutting or deleting a piece blanks it, so the space stays; dragging a piece moves its samples, and it clings to nearby edges.
+let pieceCache = null;
+function pieces() {
+  if (!hasTake()) return [];
+  const { samples, rate } = state.take, key = vsp.join(',');
+  if (pieceCache?.ref === samples && pieceCache.key === key) return pieceCache.list;
+  const min = Math.round(rate * 0.03), spans = [], n = samples.length;
+  let from = -1, last = -1;
+  for (let i = 0; i < n; i++) {
+    if (samples[i] !== 0) { if (from < 0) from = i; last = i; }
+    else if (from >= 0 && i - last > min) { spans.push([from, last + 1]); from = -1; }
+  }
+  if (from >= 0) spans.push([from, last + 1]);
+  const cuts = vsp.map((t) => Math.round(t * rate)), list = [], tiny = Math.round(rate * 0.02);
+  for (const [a, b] of spans) {
+    let lo = a;
+    for (const c of cuts.filter((c) => c > a + tiny && c < b - tiny)) { list.push({ s: lo / rate, e: c / rate }); lo = c; }
+    list.push({ s: lo / rate, e: b / rate });
+  }
+  pieceCache = { ref: samples, key, list };
+  return list;
+}
+const pieceAt = (t) => pieces().find((p) => t >= p.s && t < p.e);
+const chosenPiece = () => (asel && pieces().find((p) => Math.abs(p.s - asel.s) < 0.02)) || pieceAt(toEdit(gNow()));
+function afterVoiceEdit() { saveProject(); drawWave(); updateUI(); }
+function blankVoice(lo, hi) {
+  const { samples, rate } = state.take, out = samples.slice();
+  out.fill(0, Math.max(0, Math.round(lo * rate)), Math.min(out.length, Math.round(hi * rate)));
+  setTakeSamples(out, rate);
+  vsp = vsp.filter((t) => t < lo - 1e-4 || t > hi + 1e-4);
+}
+function voiceCut(lo, hi) {
+  if (!hasTake()) return status('There is no recording yet.');
+  checkpoint(); blankVoice(lo, hi); vsp = [...vsp, lo, hi].sort((a, b) => a - b); asel = null; afterVoiceEdit();
+  status(`Cut ${(hi - lo).toFixed(1)}s out of the voice. The space stays, drag the pieces to close it up. Undo brings it back.`);
+}
+function voiceSplit(t) {
+  const p = pieceAt(t);
+  if (!p || t - p.s < 0.1 || p.e - t < 0.1) return status('Move the playhead into the middle of a voice piece to split it.');
+  checkpoint(); vsp = [...vsp, t].sort((a, b) => a - b); asel = null; afterVoiceEdit();
+  status(`Split the voice at ${fmt(t)}. Click a piece, then drag it or press Delete.`);
+}
+function voiceDelete() {
+  const p = chosenPiece();
+  if (!p) return status('Click a piece of the voice first, or put the playhead on one.');
+  checkpoint(); blankVoice(p.s, p.e); asel = null; afterVoiceEdit();
+  status(`Deleted ${(p.e - p.s).toFixed(1)}s of voice and left the space. Undo brings it back.`);
+}
+function voiceMove(p, d) {
+  const { samples, rate } = state.take, a = Math.round(p.s * rate), b = Math.round(p.e * rate), to = Math.max(0, a + Math.round(d * rate));
+  const out = new Float32Array(Math.max(samples.length, to + (b - a))), piece = samples.slice(a, b);
+  out.set(samples); out.fill(0, a, b); out.set(piece, to);
+  setTakeSamples(out, rate);
+  const dd = (to - a) / rate, to0 = p.s + dd, to1 = p.e + dd;
+  const inside = vsp.filter((t) => t > p.s + 1e-4 && t < p.e - 1e-4).map((t) => t + dd);
+  const outside = vsp.filter((t) => !(t >= p.s - 1e-4 && t <= p.e + 1e-4) && !(t > to0 && t < to1));
+  vsp = [...outside, ...inside, to0, to1].sort((x, y) => x - y).filter((t, i, l) => !i || t - l[i - 1] > 1e-4);
+  asel = { s: to0, e: to1 };
+}
+// where a piece being dragged by d lands: its edges cling to the edges of other pieces, the start of the recording and the end of the video
+function magnet(p, d, tol) {
+  const marks = [0, editedLen(), ...pieces().filter((o) => Math.abs(o.s - p.s) > 1e-6).flatMap((o) => [o.s, o.e])];
+  d = Math.max(-p.s, d);
+  let best = null;
+  for (const edge of [p.s + d, p.e + d]) for (const q of marks) {
+    const gap = Math.abs(q - edge);
+    if (gap < tol && (!best || gap < best.gap)) best = { gap, adj: q - edge, at: q };
+  }
+  return best ? { d: Math.max(-p.s, d + best.adj), at: best.at } : { d, at: null };
+}
+let adrag = null;
+function renderPieces() {
+  const lane = $('alane');
+  const on = editVoice && hasTake() && !state.recording && editedLen() > 0;
+  lane.hidden = !on;
+  if (!on) { lane.innerHTML = ''; return; }
+  const v = vr();
+  lane.innerHTML = pieces().map((p, i) => {
+    const sel = asel && Math.abs(p.s - asel.s) < 0.02;
+    return `<div class="ablk${sel ? ' sel' : ''}" data-i="${i}" style="left:${pctE(p.s)}%;width:${((p.e - p.s) / v.len) * 100}%" title="Drag to move, Delete to remove"></div>`;
+  }).join('');
+}
+$('alane').onpointerdown = (e) => {
+  const lane = $('alane'), el = e.target.closest('.ablk');
+  if (!el || !canSeek()) return;
+  e.stopPropagation();
+  const p = pieces()[+el.dataset.i];
+  asel = { s: p.s, e: p.e };
+  lane.querySelectorAll('.ablk').forEach((b) => b.classList.toggle('sel', b === el));
+  adrag = { p, el, x0: e.clientX, perPx: vr().len / lane.getBoundingClientRect().width, d: 0, moved: false };
+  addEventListener('pointermove', amove); addEventListener('pointerup', aup); addEventListener('pointercancel', aup);
+};
+function amove(e) {
+  if (!adrag) return;
+  const lane = $('alane');
+  const dx = e.clientX - adrag.x0;
+  if (!adrag.moved && Math.abs(dx) < 4) return;
+  adrag.moved = true;
+  const m = magnet(adrag.p, dx * adrag.perPx, 10 * adrag.perPx);
+  adrag.d = m.d;
+  adrag.el.classList.add('dragging');
+  adrag.el.style.left = pctE(adrag.p.s + m.d) + '%';
+  lane.querySelector('.drop')?.remove();
+  if (m.at !== null) { const line = Object.assign(document.createElement('div'), { className: 'drop' }); line.style.left = pctE(m.at) + '%'; lane.append(line); }
+}
+function aup(e) {
+  const lane = $('alane');
+  removeEventListener('pointermove', amove); removeEventListener('pointerup', aup); removeEventListener('pointercancel', aup);
+  const d = adrag; adrag = null;
+  if (!d) return;
+  lane.querySelector('.drop')?.remove();
+  if (!d.moved || Math.abs(d.d) < 1e-3) { if (!d.moved) seekTo(toSrc(eAtX(e.clientX))); renderPieces(); return; }
+  checkpoint(); voiceMove(d.p, d.d); afterVoiceEdit();
+  status(`Moved the voice to ${fmt(asel.s)}.${overrunNote()}`);
+}
 
 const SRC_TINT = ['', 's1', 's2', 's3'];
 function renderCuts() {
@@ -497,6 +621,7 @@ function cutPress() {
   const e0 = toEdit(cutStart), e1 = toEdit(t), lo = Math.min(e0, e1), hi = Math.max(e0, e1);
   if (hi - lo < 0.1) return status('Move the playhead away from the start point first.');
   cutStart = null;
+  if (editVoice) { renderCuts(); return voiceCut(lo, hi); }
   checkpoint();
   for (const [a, b] of spansForEdited(lo, hi)) removeSpan(a, b);
   commitEdit();
@@ -508,6 +633,7 @@ $('cut').onclick = cutPress;
 
 function splitHere() {
   if (!canSeek()) return;
+  if (editVoice) return voiceSplit(toEdit(gNow()));
   const g = gNow(), k = clipIndexAt(g), c = clips[k];
   if (!c || g - c.a < 0.15 || c.b - g < 0.15) return status('Move the playhead into the middle of a clip to split it.');
   checkpoint(); clips.splice(k, 1, { ...c, b: g }, { ...c, a: g }); commitEdit();
@@ -515,6 +641,7 @@ function splitHere() {
 }
 function deleteClip() {
   if (!canSeek()) return;
+  if (editVoice) return voiceDelete();
   const k = curIdx();
   if (k < 0) return;
   const c = clips[k], at = toEdit(c.a);
@@ -525,6 +652,7 @@ function deleteClip() {
 }
 function setClipSpeed(r) {
   if (!canSeek()) return;
+  if (editVoice) { syncMode(); return status('Clip speed changes the video. Switch "Edits change" to video first.'); }
   const k = curIdx();
   if (k < 0) return;
   checkpoint(); clips[k].r = r; commitEdit();
@@ -552,7 +680,7 @@ let sdrag = null;
 const edgeAt = (blk, x) => { const r = blk.getBoundingClientRect(); return r.width < 18 ? null : x - r.left < 7 ? 'l' : r.right - x < 7 ? 'r' : null; };
 strip.onpointerdown = (e) => {
   const blk = e.target.closest('.blk');
-  if (!blk || !canSeek()) return;
+  if (!blk || !canSeek() || editVoice) return; // with voice-only edits the clips just move the playhead
   e.stopPropagation();
   strip.setPointerCapture(e.pointerId);
   const i = +blk.dataset.i, c = clips[i], W = strip.getBoundingClientRect().width;
@@ -817,11 +945,11 @@ function drawWave() {
   const g = canvas.getContext('2d'), W = canvas.width, H = canvas.height;
   g.clearRect(0, 0, W, H);
   const v = vr();
-  if (!editedLen() || !W) return;
+  if (!editedLen() || !W) { renderPieces(); return; }
   const perPx = v.len / W; // seconds of edited video per pixel
   if (ctx || peaks.length) {
     const rate = state.take?.rate || ctx?.sampleRate || 48000;
-    g.fillStyle = '#ffb88e26';
+    g.fillStyle = editVoice ? '#00000000' : '#ffb88e26';
     const vsec = (peaks.length * B) / rate, end = (((voiceFree ? vsec : toEdit(Math.min(total(), vsec))) - v.s) / v.len) * W;
     g.fillRect(0, 0, Math.max(0, Math.min(W, end)), H);
     g.fillStyle = '#f08a4b';
@@ -830,6 +958,7 @@ function drawWave() {
       if (b0 >= peaks.length) break;
       let mx = 0;
       for (let b = b0; b < b1 && b < peaks.length; b++) mx = Math.max(mx, peaks[b]);
+      if (editVoice && mx === 0) continue; // a gap is left empty
       const h = Math.max(2 * dpr, Math.min(1, mx * 1.6) * H * 0.9);
       g.fillRect(x, (H - h) / 2, 1, h);
     }
@@ -842,6 +971,7 @@ function drawWave() {
     g.beginPath(); g.moveTo(x + 0.5, H - 14 * dpr); g.lineTo(x + 0.5, H); g.stroke();
     g.fillText(tlabel(t, step), x + 3 * dpr, H - 2 * dpr);
   }
+  renderPieces();
 }
 addEventListener('resize', drawWave);
 
@@ -1343,7 +1473,7 @@ $('trim').onclick = () => {
 };
 
 function discardTake() {
-  stopPlay(); state.take = null; mixCache = null; peaks = []; capturing = false; state.attempts = {};
+  stopPlay(); state.take = null; vsp = []; asel = null; mixCache = null; peaks = []; capturing = false; state.attempts = {};
   kv.del('take'); kv.del('attempts'); drawWave(); updateUI(); renderSections();
 }
 $('clear').onclick = () => { archiveTake(); checkpoint(); discardTake(); status('Take discarded.'); };
@@ -1394,7 +1524,7 @@ $('takes').onclick = (e) => {
     if (!!t.free !== voiceFree) return status(`${t.name} was recorded with edits changing ${t.free ? 'the video only' : 'video and voice'}. Switch "Edits change" to match first.`);
     stopPlay(); try { listenSrc?.stop(); } catch {} listening = null;
     checkpoint(); archiveTake();
-    state.take = { samples: t.samples, rate: t.rate }; mixCache = null;
+    state.take = { samples: t.samples, rate: t.rate }; vsp = []; asel = null; mixCache = null;
     rebuildPeaks(t.samples); saveTake(); touched(); drawWave(); renderSections(); renderTakes(); updateUI();
     status(`Now using ${t.name}. The one you had before is kept in the list.`);
   } else if (b.dataset.a === 'del') {
@@ -1531,7 +1661,7 @@ $('audioFile').onchange = async (e) => {
     const mono = new Float32Array(buf.length);
     for (let c = 0; c < buf.numberOfChannels; c++) { const d = buf.getChannelData(c); for (let i = 0; i < mono.length; i++) mono[i] += d[i] / buf.numberOfChannels; }
     stopPlay(); archiveTake(); checkpoint();
-    state.take = { samples: mono, rate: buf.sampleRate }; state.attempts = {}; mixCache = null; cleaned = null;
+    state.take = { samples: mono, rate: buf.sampleRate }; vsp = []; asel = null; state.attempts = {}; mixCache = null; cleaned = null;
     rebuildPeaks(mono); saveTake(); saveAttempts(); touched(); drawWave(); renderSections(); renderTakes(); updateUI();
     status(`Imported ${f.name} (${fmt(buf.duration)}). Move the playhead and press Record to carry on from it. Undo brings back what was there.`);
   } catch { status('Could not read that audio file.'); }
@@ -1659,7 +1789,7 @@ updateUI();
   clips = sources.map((x) => ({ a: x.off, b: x.off + x.dur, r: 1 }));
   try { // the saved edit counts only if it still fits the videos
     const e = JSON.parse(localStorage.getItem('project') || 'null');
-    if (e && Math.abs(e.total - total()) < 0.05 && Array.isArray(e.clips) && e.clips.every((c) => c.b > c.a && c.a >= 0 && c.b <= total() + 0.01)) { clips = e.clips; zooms = (e.zooms || []).filter((z) => z.b > z.a); voiceFree = !!e.voiceFree; $('editMode').value = voiceFree ? 'video' : 'both'; }
+    if (e && Math.abs(e.total - total()) < 0.05 && Array.isArray(e.clips) && e.clips.every((c) => c.b > c.a && c.a >= 0 && c.b <= total() + 0.01)) { clips = e.clips; zooms = (e.zooms || []).filter((z) => z.b > z.a); voiceFree = !!e.voiceFree; vsp = Array.isArray(e.vsp) ? e.vsp : []; syncMode(); }
   } catch {}
   const take = await kv.get('take');
   if (take?.samples?.length) { state.take = take; rebuildPeaks(take.samples); mixCache = null; }

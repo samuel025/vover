@@ -42,6 +42,7 @@
     <div class="timeline disabled" id="timeline">
       <div class="strip" id="strip"></div>
       <canvas id="wave"></canvas>
+      <div class="alane" id="alane" hidden></div>
       <div class="marks" id="marks"></div>
       <div class="cuts" id="cuts"></div>
       <div class="playhead" id="playhead"><b></b></div>
@@ -51,8 +52,8 @@
     <div class="clipbar">
       <button id="undo" class="btn sm" title="Undo (Ctrl+Z)" disabled>↶ Undo</button>
       <button id="redo" class="btn sm" title="Redo (Ctrl+Shift+Z)" disabled>↷ Redo</button>
-      <label class="chk" title="Choose whether cuts, trims, deletes and moves also change your recorded voice">Edits change
-        <select id="editMode"><option value="both">video and voice</option><option value="video">video only</option></select>
+      <label class="chk" title="Choose what cuts, splits, deletes and moves change: the video and voice together, just the video, or just the voice (cuts leave silence and the voice can be dragged)">Edits change
+        <select id="editMode"><option value="both">video and voice</option><option value="video">video only</option><option value="voice">voice only</option></select>
       </label>
       <span class="gap"></span>
       <button id="split" class="btn sm" title="Split the video at the playhead (B)" disabled>Split</button>
