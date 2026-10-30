@@ -47,7 +47,12 @@ const kv = {
   },
   async del(k) { const d = await db; if (d) try { d.transaction('kv', 'readwrite').objectStore('kv').delete(k); } catch {} },
 };
-const saveTake = () => (hasTake() ? kv.set('take', state.take) : kv.del('take'));
+// writing a long recording to storage copies all of it, so quick edits (undo, drags) share one write
+let takeTimer = 0;
+const writeTake = () => { clearTimeout(takeTimer); takeTimer = 0; return hasTake() ? kv.set('take', state.take) : kv.del('take'); };
+const saveTake = () => { clearTimeout(takeTimer); takeTimer = setTimeout(writeTake, 700); };
+addEventListener('pagehide', () => { if (takeTimer) writeTake(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden && takeTimer) writeTake(); });
 const saveAttempts = () => kv.set('attempts', state.attempts);
 const getCtx = () => (ctx ||= new AudioContext());
 const concat = (arrs) => { const out = new Float32Array(arrs.reduce((n, a) => n + a.length, 0)); let o = 0; for (const a of arrs) { out.set(a, o); o += a.length; } return out; };
@@ -363,11 +368,12 @@ $('addFile').onchange = (e) => { addVideo(e.target.files[0]); e.target.value = '
 const snap = () => ({ clips: JSON.stringify(clips), zooms: JSON.stringify(zooms), voiceFree, vsp: vsp.slice(), sources: sources.slice(), take: state.take ? { samples: state.take.samples, rate: state.take.rate } : null });
 function checkpoint() { history.push(snap()); if (history.length > 15) history.shift(); future = []; updateUI(); }
 function applySnap(sn) {
+  const sameTake = (state.take?.samples || null) === (sn.take?.samples || null), sameSources = sources.length === sn.sources.length && sources.every((x, i) => x === sn.sources[i]);
   clips = JSON.parse(sn.clips); zooms = JSON.parse(sn.zooms); voiceFree = !!sn.voiceFree; vsp = (sn.vsp || []).slice(); asel = null; syncMode(); zsel = null; pick = null; sources = sn.sources.slice(); cutStart = null;
   if (loaded >= sources.length) loaded = -1;
   state.take = sn.take ? { ...sn.take } : null; mixCache = null;
-  rebuildPeaks(state.take?.samples || new Float32Array(0));
-  saveProject(); saveSources(); saveTake(); touched(); renderCuts(); renderZooms(); renderSections(); drawWave(); updateUI();
+  if (!sameTake) rebuildPeaks(state.take?.samples || new Float32Array(0));
+  saveProject(); if (!sameSources) saveSources(); if (!sameTake) saveTake(); touched(); renderCuts(); renderZooms(); renderSections(); drawWave(); updateUI();
   if (loaded < 0 || clipIndexAt(gNow()) < 0) gSeek(snapG(gNow()));
 }
 function undo() { if (!canSeek() || !history.length) return; stopPlay(); future.push(snap()); applySnap(history.pop()); status('Undone.'); }
@@ -1174,6 +1180,7 @@ function tick() {
   if (!state.recording) updateRecLabel();
   // a section retake stops by itself at the end of its section
   if (state.recording && !state.recPaused && state.range && t >= state.range.end - 0.02) stopRecording();
+  if (state.recording && !state.recPaused && !state.range && recLimit !== null && vt(t) >= recLimit - 0.02) { stopRecording(); status('Stopped: the next piece of voice starts here, and recording never goes over it.'); }
   if (state.playing) { // faster / slower parts of the video
     const want = Math.min(16, (+$('rate').value || 1) * speedAt(t));
     if (Math.abs(video.playbackRate - want) > 1e-3) video.playbackRate = want;
@@ -1407,11 +1414,21 @@ async function retakeSection(i) {
   startRecording({ sec: i, start: sections[i].start, end: sectionEnd(i) });
 }
 
+// Recording never goes over voice that is already there: it only starts in empty space and stops where the next piece begins.
+let recLimit = null;
+// the last moments of a piece count as its end, so a paused recording can carry on
+function recBlocked() {
+  const t = vt(gNow());
+  if (hasTake() && pieces().some((p) => t >= p.s && t < p.e - 0.25)) { status('There is already voice here. Move the playhead into an empty space (or cut or delete that part of the voice first) to record.'); return true; }
+  recLimit = hasTake() ? (pieces().find((p) => p.s > t)?.s ?? null) : null;
+  return false;
+}
 async function startRecording(range = null) {
   if (!(stream?.active || (await initMic()))) return;
   await ctx.resume();
   stopPlay();
   if (editedLen() - toEdit(gNow()) < 0.2) { status('The playhead is at the end. Move it back to where you want to record from.'); return; }
+  if (!range && recBlocked()) return;
   state.range = range;
   setTab('read');
   video.muted = true;
@@ -1421,6 +1438,7 @@ async function startRecording(range = null) {
   }
   showCount(null);
   state.recording = true; state.recPaused = false; playK = curIdx();
+  if (range) recLimit = null;
   beginCapture();
   await video.play();
   status(range ? `Retaking section ${range.sec + 1}… it stops by itself at the end of the section.` : 'Recording… read the highlighted text. Press M when you start each new section.');
@@ -1434,6 +1452,7 @@ function pauseRecording() {
   updateUI();
 }
 async function resumeRecording() {
+  if (!state.range && recBlocked()) return;
   stopPlay();
   video.muted = true;
   await ctx.resume();
@@ -1453,7 +1472,7 @@ function stopRecording() {
   state.recording = false; state.recPaused = false; state.range = null;
   video.muted = !$('hear').checked;
   status(`Take saved (${fmt(voiceFree ? voiceSec() : toEdit(voiceSec()))}). Play it back, record more from the playhead, or export.`);
-  updateUI();
+  drawWave(); updateUI();
 }
 $('rec').onclick = () => (state.recording ? stopRecording() : startRecording());
 $('pauseRec').onclick = () => (state.recPaused ? resumeRecording() : pauseRecording());
@@ -1742,13 +1761,14 @@ $('export').onclick = async () => {
 };
 
 // ---------- keyboard ----------
+document.addEventListener('keyup', (e) => { if (e.code === 'Space' && !/TEXTAREA|INPUT|SELECT/.test(e.target.tagName)) e.preventDefault(); });
 document.addEventListener('keydown', (e) => {
   if (/TEXTAREA|INPUT|SELECT/.test(e.target.tagName) || !state.file) return;
   const k = e.key.toLowerCase();
   if ((e.ctrlKey || e.metaKey) && (k === 'z' || k === 'y')) { e.preventDefault(); (k === 'y' || e.shiftKey ? redo : undo)(); return; }
   if (e.metaKey || e.ctrlKey) return;
   const cur = sectionAt(gNow());
-  if (e.code === 'Space') { e.preventDefault(); state.recording ? $('pauseRec').click() : togglePlay(); }
+  if (e.code === 'Space') { e.preventDefault(); e.target.blur?.(); state.recording && !state.recPaused ? $('pauseRec').click() : togglePlay(); } // a focused button must not also react to the space bar
   else if (k === 'r') $('rec').click();
   else if (k === 't') $('trim').click();
   else if (k === 'x') cutPress();
