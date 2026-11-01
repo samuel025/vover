@@ -613,7 +613,7 @@ function updateClip() {
   if (k < 0) { $('clipInfo').textContent = ''; return; }
   $('strip').querySelector(`[data-i="${k}"]`)?.classList.add('sel');
   const s = segs()[k];
-  $('clipInfo').textContent = `Clip ${k + 1} of ${clips.length} · ${((s.b - s.a) / s.r).toFixed(1)}s`;
+  $('clipInfo').textContent = `Clip ${k + 1} of ${clips.length} · ${((s.b - s.a) / s.r).toFixed(1)}s · ${editVoice ? 'edits change the voice only' : voiceFree ? 'Delete keeps your voice' : 'Delete removes the voice under it too'}`;
   $('clipSpeed').value = String(s.r);
 }
 
