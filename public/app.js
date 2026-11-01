@@ -136,6 +136,9 @@ function scrubAt(e) {
   seekTo(toSrc(eAtX(e.clientX)));
 }
 let scrubbing = false;
+// clicking the timeline takes the keyboard back from a menu or button, so Delete, B and the space bar act on the timeline
+const releaseFocus = () => { const a = document.activeElement; if (a && /SELECT|BUTTON/.test(a.tagName)) a.blur(); };
+timeline.addEventListener('pointerdown', releaseFocus, true);
 timeline.onpointerdown = (e) => { if (!canSeek()) return; scrubbing = true; timeline.setPointerCapture(e.pointerId); scrubAt(e); };
 timeline.onpointermove = (e) => { if (scrubbing) scrubAt(e); };
 timeline.onpointerup = timeline.onpointercancel = () => { scrubbing = false; };
@@ -431,6 +434,7 @@ function unbakeVoice() {
 function syncMode() { if (!voiceFree) editVoice = false; $('editMode').value = !voiceFree ? 'both' : editVoice ? 'voice' : 'video'; }
 $('editMode').onchange = (e) => {
   const mode = e.target.value, free = mode !== 'both';
+  e.target.blur();
   if (!canSeek()) { syncMode(); return status('Stop recording first.'); }
   if (free !== voiceFree) {
     stopPlay(); archiveTake(); checkpoint();
@@ -666,7 +670,7 @@ function setClipSpeed(r) {
 }
 $('split').onclick = splitHere;
 $('delClip').onclick = deleteClip;
-$('clipSpeed').onchange = (e) => setClipSpeed(+e.target.value);
+$('clipSpeed').onchange = (e) => { setClipSpeed(+e.target.value); e.target.blur(); };
 
 // cut out long silences in the recording (and the video under them)
 $('pauses').onclick = () => {
