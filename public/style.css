@@ -233,3 +233,7 @@ body.app .stage>*:not(.video-wrap){flex:none}
 .ablk.sel{border-color:var(--text);background:#f08a4b44}
 .ablk.dragging{cursor:grabbing;background:#f08a4b55}
 .alane .drop{background:#2f7cf6}
+
+/* empty space in the video track */
+.blk.gap{background:repeating-linear-gradient(45deg,#0000000d 0 6px,transparent 6px 12px);border:1px dashed #00000040;color:#737373;cursor:pointer;justify-content:center}
+.blk.gap::before,.blk.gap::after{display:none}

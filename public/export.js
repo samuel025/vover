@@ -67,14 +67,17 @@ export async function exportLocally({ sources, voice, segs, fx = {}, saveHandle,
 
   // open every video that is used
   const tracks = {};
-  for (const k of new Set(segs.map((x) => x.src))) {
+  const blank = (k) => !!sources[k].blank; // a gap in the video track: black picture
+  for (const k of new Set(segs.filter((x) => !blank(x.src)).map((x) => x.src))) {
     const input = new Input({ source: new BlobSource(sources[k].file), formats: ALL_FORMATS });
     const video = await input.getPrimaryVideoTrack();
     if (!video) throw new Unsupported('No video track found.');
     tracks[k] = { video, duration: await video.computeDuration(), sink: null };
   }
-  const first = tracks[segs[0].src];
-  const multi = Object.keys(tracks).length > 1;
+  const firstSeg = segs.find((x) => !blank(x.src));
+  if (!firstSeg) throw new Unsupported('There is no video left in the timeline to export.');
+  const first = tracks[firstSeg.src];
+  const multi = Object.keys(tracks).length > 1 || segs.some((x) => blank(x.src));
 
   const format = new Mp4OutputFormat({ fastStart: saveHandle ? false : 'in-memory' });
   const vcodec = await first.video.getCodec();
@@ -160,7 +163,20 @@ export async function exportLocally({ sources, voice, segs, fx = {}, saveHandle,
     };
     if (intro) await card(intro.text, 0, intro.sec);
     for (const seg of segs) {
-      const tr = tracks[seg.src], { a, b, r } = seg, off = sources[seg.src].off;
+      const { a, b, r } = seg, off = sources[seg.src].off;
+      if (blank(seg.src)) { // empty space: black frames, with any captions that fall in it
+        const len = (b - a) / r;
+        for (let t = 0; t < len; t += 0.1) {
+          const gt = off + a + t * r;
+          g.fillStyle = '#000'; g.fillRect(0, 0, outW, outH);
+          const c = caps.find((x) => gt >= x.t0 && gt < x.t1);
+          if (c) drawCaption(g, outW, outH, c.text);
+          await vsource.add(outAt + t, Math.min(0.1, len - t));
+        }
+        outAt += len; onProgress?.(Math.min(1, outAt / total));
+        continue;
+      }
+      const tr = tracks[seg.src];
       tr.sink ||= new VideoSampleSink(tr.video);
       const pl0 = mode === 'canvas' && !zooms.length ? place(tr.video.displayWidth, tr.video.displayHeight) : null;
       for await (const s of tr.sink.samples(a, b)) {

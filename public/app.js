@@ -153,7 +153,15 @@ let clips = [];    // { a, b, r } in project time; r is the speed
 let loaded = -1, seekToken = 0, jumping = false;
 const total = () => (sources.length ? sources[sources.length - 1].off + sources[sources.length - 1].dur : 0);
 const srcOf = (g) => { for (let k = 0; k < sources.length; k++) if (g < sources[k].off + sources[k].dur - 1e-6) return k; return Math.max(0, sources.length - 1); };
-const gNow = () => (loaded >= 0 ? sources[loaded].off + (video.currentTime || 0) : 0);
+// A gap in the video track is a "blank" source with no file: nothing plays there, and a clock stands in for the video.
+const bk = { t: 0, since: 0, on: false };
+const isBlankSrc = (i) => !!sources[i]?.blank;
+const blankT = () => Math.min(sources[loaded]?.dur ?? 0, bk.t + (bk.on ? ((performance.now() - bk.since) / 1000) * (state.recording ? 1 : +$('rate').value || 1) : 0));
+const gNow = () => (loaded >= 0 && sources[loaded] ? sources[loaded].off + (isBlankSrc(loaded) ? blankT() : video.currentTime || 0) : 0);
+const vPlay = () => { if (isBlankSrc(loaded)) { bk.t = blankT(); bk.since = performance.now(); bk.on = true; return Promise.resolve(); } return video.play(); };
+const vPause = () => { if (isBlankSrc(loaded)) { bk.t = blankT(); bk.on = false; } video.pause(); };
+const vPaused = () => (isBlankSrc(loaded) ? !bk.on : video.paused);
+const realTotal = () => sources.reduce((m, x) => (x.blank ? m : Math.max(m, x.off + x.dur)), 0);
 
 function probe(file) {
   return new Promise((res, rej) => {
@@ -168,6 +176,7 @@ function probe(file) {
 // in one step, so changing from one video to another never shows a blank player or the start of the video.
 const prep = { i: -1, t: 0, p: null };
 function prepare(i, g) {
+  if (isBlankSrc(i)) return Promise.resolve();
   const t = Math.max(0, g - sources[i].off);
   if (prep.i === i && Math.abs(prep.t - t) < 0.05 && prep.p) return prep.p; // already on its way
   prep.i = i; prep.t = t;
@@ -186,13 +195,18 @@ function swapPlayers(i) {
   video.hidden = false; video.muted = old.muted;
   video.style.visibility = ''; spare.style.visibility = 'hidden';
   spare.pause(); spare.style.transform = '';
-  loaded = i; prep.i = -1; prep.p = null;
+  loaded = i; bk.on = false; prep.i = -1; prep.p = null;
 }
 // moves the playhead to project time g, switching to another video file when it lives in one
 async function gSeek(g) {
   if (!sources.length) return;
   g = Math.max(0, Math.min(total(), g));
   const i = srcOf(g), token = ++seekToken;
+  if (isBlankSrc(i)) { // a gap: hide the picture and run the clock from here
+    if (!isBlankSrc(loaded)) { video.pause(); video.style.visibility = 'hidden'; bk.on = false; }
+    loaded = i; bk.t = g - sources[i].off; bk.since = performance.now();
+    return;
+  }
   if (i === loaded) { video.currentTime = g - sources[i].off; return; }
   await prepare(i, g);
   if (token !== seekToken || prep.i !== i) return;
@@ -238,6 +252,7 @@ const curIdx = () => clipIndexAt(Math.min(gNow(), total() - 1e-3));
 const gapsOf = () => { // parts of the videos that no clip uses (they were cut or trimmed away)
   const out = [];
   for (const s of sources) {
+    if (s.blank) continue;
     const used = clips.filter((c) => c.a >= s.off - 1e-6 && c.b <= s.off + s.dur + 1e-6).sort((x, y) => x.a - y.a);
     let at = s.off;
     for (const c of used) { if (c.a - at > 0.05) out.push({ a: at, b: c.a }); at = Math.max(at, c.b); }
@@ -247,6 +262,49 @@ const gapsOf = () => { // parts of the videos that no clip uses (they were cut o
 };
 // true when the export could be done by cutting the one video alone: no moving, no speed changes, no second video
 const plainEdit = () => sources.length === 1 && clips.every((c, i) => c.r === 1 && (i === 0 || c.a >= clips[i - 1].b - 1e-6));
+
+// ---------- gaps: clips that sit wherever they are put ----------
+// With the voice on its own track the video track works like a normal editor: deleting or moving a clip leaves empty space instead of
+// closing up. Every real clip has a start time on the timeline; the space between them is filled by gap clips taken from one "gap" source.
+const isBlankClip = (c) => !!c && !!sources[sameSrc(c)]?.blank;
+const realItems = () => segs().filter((g) => !sources[g.src].blank).map((g) => ({ c: { a: g.a, b: g.b, r: g.r }, at: g.e0 }));
+function layout(items) {
+  const keepE = loaded >= 0 && clips.length ? toEdit(gNow()) : 0, was = sources[loaded];
+  items = items.slice().sort((x, y) => x.at - y.at);
+  const real = sources.filter((x) => !x.blank), base = realTotal(), out = [];
+  let end = 0;
+  for (const it of items) { // a clip dropped on top of another is pushed along to the end of it
+    const at = Math.max(it.at, end);
+    if (at - end > 0.02) out.push({ a: 0, b: at - end, r: 1, gap: true });
+    out.push(it.c); end = at + (it.c.b - it.c.a) / it.c.r;
+  }
+  const dur = out.reduce((n, c) => n + (c.gap ? c.b : 0), 0);
+  sources = dur > 0 ? [...real, { id: 'gap', name: 'Gap', blank: true, dur, off: base }] : real;
+  let o = base;
+  for (const c of out) if (c.gap) { const d = c.b; c.a = o; c.b = o + d; o += d; delete c.gap; }
+  clips = out;
+  touched(); saveSources();
+  if (loaded >= 0 && sources[loaded] !== was) { loaded = -1; if (clips.length) gSeek(snapG(toSrc(keepE))); }
+}
+// removes gap clips and the gap source (the voice is tied to the video again, so there is nothing to leave space for)
+function dropGaps() {
+  const was = sources[loaded];
+  clips = clips.filter((c) => !isBlankClip(c)); sources = sources.filter((x) => !x.blank);
+  if (sources[loaded] !== was) loaded = -1;
+  touched(); saveSources();
+}
+// takes [lo, hi] (timeline seconds) out of the clips that cover it and leaves the space
+function cutFree(lo, hi) {
+  const items = [];
+  for (const g of segs()) {
+    if (sources[g.src].blank) continue;
+    const e1 = g.e0 + (g.b - g.a) / g.r;
+    if (hi <= g.e0 || lo >= e1) { items.push({ c: { a: g.a, b: g.b, r: g.r }, at: g.e0 }); continue; }
+    if (lo > g.e0 + 0.01) items.push({ c: { a: g.a, b: g.a + (lo - g.e0) * g.r, r: g.r }, at: g.e0 });
+    if (hi < e1 - 0.01) items.push({ c: { a: g.a + (hi - g.e0) * g.r, b: g.b, r: g.r }, at: hi });
+  }
+  layout(items);
+}
 
 // ---------- timeline zoom ----------
 // The timeline can show just part of the edited video, so cuts and trims can be placed precisely.
@@ -310,7 +368,7 @@ async function addSource(file, id) {
   sources.push(s);
   return s;
 }
-const saveSources = () => kv.set('sources', sources.map(({ id, name, dur }) => ({ id, name, dur })));
+const saveSources = () => kv.set('sources', sources.map(({ id, name, dur, blank }) => ({ id, name, dur, blank })));
 function saveProject() { try { localStorage.setItem('project', JSON.stringify({ total: total(), clips, zooms, voiceFree, vsp })); } catch {} }
 
 async function showProject(msg) {
@@ -343,13 +401,19 @@ async function addVideo(file) {
   if (!sources.length) return loadVideo(file);
   if (state.recording && !state.recPaused) return status('Stop recording first.');
   stopPlay();
+  const pool = sources.filter((x) => x.blank), k = curIdx();
   try {
     checkpoint();
-    const s = await addSource(file);
-    clips.push({ a: s.off, b: s.off + s.dur, r: 1 });
+    // with separate tracks the video goes into the empty space under the playhead, or at the end
+    const items = voiceFree ? realItems() : null, e = toEdit(gNow()), atEnd = editedLen(), into = voiceFree && isBlankClip(clips[k]);
+    if (voiceFree) { if (isBlankSrc(loaded)) loaded = -1; sources = sources.filter((x) => !x.blank); }
+    let s;
+    try { s = await addSource(file); } catch (err) { sources = [...sources, ...pool]; throw err; }
+    if (voiceFree) { items.push({ c: { a: s.off, b: s.off + s.dur, r: 1 }, at: into ? e : atEnd }); layout(items); if (loaded < 0) await gSeek(snapG(toSrc(e))); }
+    else clips.push({ a: s.off, b: s.off + s.dur, r: 1 });
     kv.set('src-' + s.id, { file }); saveSources();
     commitEdit(); updateUI();
-    status(`Added ${file.name} at the end. Your script and recording now run across both videos. Use New project to start over instead.`);
+    status(voiceFree ? `Added ${file.name} ${into ? 'in the empty space at the playhead' : 'at the end'}. Drag it anywhere on the timeline.` : `Added ${file.name} at the end. Your script and recording now run across both videos. Use New project to start over instead.`);
   } catch { history.pop(); status('This browser cannot play that video. Try an MP4 (H.264) or WebM file.'); }
 }
 // A blank workspace: the video, script, recording, takes, music and edits are cleared (the original video file is never touched).
@@ -373,13 +437,14 @@ $('addFile').onchange = (e) => { addVideo(e.target.files[0]); e.target.value = '
 const snap = () => ({ clips: JSON.stringify(clips), zooms: JSON.stringify(zooms), voiceFree, vsp: vsp.slice(), sources: sources.slice(), take: state.take ? { samples: state.take.samples, rate: state.take.rate } : null });
 function checkpoint() { history.push(snap()); if (history.length > 15) history.shift(); future = []; updateUI(); }
 function applySnap(sn) {
+  const keepE = sources.length && loaded >= 0 ? toEdit(gNow()) : 0, was = sources[loaded];
   const sameTake = (state.take?.samples || null) === (sn.take?.samples || null), sameSources = sources.length === sn.sources.length && sources.every((x, i) => x === sn.sources[i]);
   clips = JSON.parse(sn.clips); zooms = JSON.parse(sn.zooms); voiceFree = !!sn.voiceFree; vsp = (sn.vsp || []).slice(); asel = null; syncMode(); zsel = null; pick = null; sources = sn.sources.slice(); cutStart = null;
-  if (loaded >= sources.length) loaded = -1;
+  if (loaded >= sources.length || sources[loaded] !== was) loaded = -1;
   state.take = sn.take ? { ...sn.take } : null; mixCache = null;
   if (!sameTake) rebuildPeaks(state.take?.samples || new Float32Array(0));
   saveProject(); if (!sameSources) saveSources(); if (!sameTake) saveTake(); touched(); renderCuts(); renderZooms(); renderSections(); drawWave(); updateUI();
-  if (loaded < 0 || clipIndexAt(gNow()) < 0) gSeek(snapG(gNow()));
+  if (loaded < 0 || clipIndexAt(gNow()) < 0) gSeek(snapG(loaded < 0 ? toSrc(keepE) : gNow()));
 }
 function undo() { if (!canSeek() || !history.length) return; stopPlay(); future.push(snap()); applySnap(history.pop()); status('Undone.'); }
 function redo() { if (!canSeek() || !future.length) return; stopPlay(); history.push(snap()); applySnap(future.pop()); status('Redone.'); }
@@ -440,7 +505,7 @@ $('editMode').onchange = (e) => {
   if (!canSeek()) { syncMode(); return status('Stop recording first.'); }
   if (free !== voiceFree) {
     stopPlay(); archiveTake(); checkpoint();
-    if (free) bakeVoice(); else unbakeVoice();
+    if (free) bakeVoice(); else { unbakeVoice(); if (sources.some((x) => x.blank)) { dropGaps(); const n = Math.round(realTotal() * state.take.rate); if (hasTake() && state.take.samples.length > n) setTakeSamples(state.take.samples.slice(0, n), state.take.rate); gSeek(0); } }
     voiceFree = free;
   }
   editVoice = mode === 'voice'; asel = null;
@@ -572,6 +637,7 @@ function renderCuts() {
   const v = vr(), list = segs(), k = curIdx(), pct = (e) => ((e - v.s) / v.len) * 100;
   $('strip').innerHTML = list.map((s, i) => {
     const w = ((s.b - s.a) / s.r / v.len) * 100;
+    if (sources[s.src].blank) return `<div class="blk gap${i === k ? ' sel' : ''}" data-i="${i}" style="left:${pct(s.e0)}%;width:${w}%" title="Empty space. Click it and press Delete to close it, or drag a clip in"><span>${((s.b - s.a) / s.r).toFixed(1)}s</span></div>`;
     const label = `${i + 1}${s.r !== 1 ? ` · ${s.r}×` : ''}${sources.length > 1 ? ` · ${esc(sources[s.src].name)}` : ''}`;
     return `<div class="blk ${SRC_TINT[s.src % 4]}${i === k ? ' sel' : ''}" data-i="${i}" style="left:${pct(s.e0)}%;width:${w}%" title="${esc(sources[s.src]?.name || '')}"><span>${label}</span></div>`;
   }).join('');
@@ -582,7 +648,7 @@ function renderCuts() {
   }).join('') + (cutStart === null ? '' : `<i class="pending" style="left:${pct(toEdit(cutStart))}%"></i>`)
     + zooms.map((z) => `<b class="zm${z === zsel ? ' sel' : ''}" style="left:${pct(toEdit(z.a))}%;width:${Math.max(0.5, ((toEdit(z.b) - toEdit(z.a)) / v.len) * 100)}%">🔍 ${z.k.toFixed(1)}×</b>`).join('');
   $('dur').textContent = fmt(editedLen());
-  const gaps = gapsOf(), bar = $('cutbar');
+  const gaps = voiceFree ? [] : gapsOf(), bar = $('cutbar');
   bar.hidden = !gaps.length && cutStart === null;
   bar.innerHTML = (cutStart !== null
     ? `<span>Cut starts at ${fmt(toEdit(cutStart))}. Move to where it ends, then press Cut again (Esc cancels).</span>`
@@ -613,6 +679,7 @@ function updateClip() {
   if (k < 0) { $('clipInfo').textContent = ''; return; }
   $('strip').querySelector(`[data-i="${k}"]`)?.classList.add('sel');
   const s = segs()[k];
+  if (sources[s.src].blank) { $('clipInfo').textContent = `Empty space ${((s.b - s.a) / s.r).toFixed(1)}s · Delete closes it`; return; }
   $('clipInfo').textContent = `Clip ${k + 1} of ${clips.length} · ${((s.b - s.a) / s.r).toFixed(1)}s · ${editVoice ? 'edits change the voice only' : voiceFree ? 'Delete keeps your voice' : 'Delete removes the voice under it too'}`;
   $('clipSpeed').value = String(s.r);
 }
@@ -635,7 +702,7 @@ function cutPress() {
   cutStart = null;
   if (editVoice) { renderCuts(); return voiceCut(lo, hi); }
   checkpoint();
-  for (const [a, b] of spansForEdited(lo, hi)) removeSpan(a, b);
+  if (voiceFree) cutFree(lo, hi); else for (const [a, b] of spansForEdited(lo, hi)) removeSpan(a, b);
   commitEdit();
   seekTo(toSrc(lo));
   status(`Removed ${(hi - lo).toFixed(1)}s of video. It is skipped in playback and left out of the export.${voiceFree ? '' : ' The voice under it was removed too, so the rest moved up. To cut only the voice and keep the space, set Edits change to "voice only" and undo (Ctrl+Z) first.'}${overrunNote()}`);
@@ -657,13 +724,19 @@ function deleteClip() {
   const k = curIdx();
   if (k < 0) return;
   const c = clips[k], at = toEdit(c.a);
-  checkpoint(); clips.splice(k, 1); commitEdit();
+  checkpoint();
+  if (voiceFree) { // the space stays; deleting a gap itself closes it
+    if (isBlankClip(c)) { clips.splice(k, 1); layout(realItems()); }
+    else layout(realItems().filter((it) => !(it.c.a === c.a && it.c.b === c.b)));
+  } else clips.splice(k, 1);
+  commitEdit();
   if (!clips.length) { seekTo(0); return status(voiceFree ? 'The video is gone and your voice is kept. Click "+ Add video" to put a new video under it, or Undo (Ctrl+Z) to bring the old one back.' : 'Everything was deleted, voice included. Press Undo (Ctrl+Z) to bring it back.'); }
   seekTo(toSrc(Math.min(at, editedLen() - 0.01)));
-  status(`Deleted the clip (${((c.b - c.a) / c.r).toFixed(1)}s).${overrunNote()}`);
+  status(isBlankClip(c) ? 'Closed the gap.' : `Deleted the clip (${((c.b - c.a) / c.r).toFixed(1)}s).${voiceFree ? ' The space stays where it was; drag a clip into it, or click the space and press Delete to close it.' : ''}${overrunNote()}`);
 }
 function setClipSpeed(r) {
   if (!canSeek()) return;
+  if (isBlankClip(clips[curIdx()])) return;
   if (editVoice) { syncMode(); return status('Clip speed changes the video. Switch "Edits change" to video first.'); }
   const k = curIdx();
   if (k < 0) return;
@@ -701,15 +774,21 @@ strip.onpointerdown = (e) => {
   // a clip that was split from this one shares the edge, so it moves along with it (found now: it moves while dragging)
   sdrag = { i, c0: { ...c }, edge: edgeAt(blk, e.clientX), x0: e.clientX, perPx: vr().len / W, moved: false, saved: false, to: i,
     pr: clips.findIndex((o, j) => joined(o, j, 'r')), pl: clips.findIndex((o, j) => joined(o, j, 'l')) };
+  if (voiceFree) { // clips stay where they are put: remember where every clip starts, and move or trim only this one
+    const items0 = realItems(), me = items0.findIndex((it) => it.c.a === c.a && it.c.b === c.b);
+    Object.assign(sdrag, { pr: -1, pl: -1, items0, me, at0: segs()[i].e0, len: (c.b - c.a) / c.r });
+    if (me < 0) sdrag.edge = null; // an empty space is not dragged
+  }
 };
 strip.onpointermove = (e) => {
   if (!sdrag) { const blk = e.target.closest?.('.blk'); strip.style.cursor = blk && edgeAt(blk, e.clientX) ? 'col-resize' : ''; return; }
   const dx = e.clientX - sdrag.x0;
   if (!sdrag.moved && Math.abs(dx) < 4) return;
+  if (sdrag.items0 && sdrag.me < 0) return;
   sdrag.moved = true;
   if (!sdrag.saved) { checkpoint(); sdrag.saved = true; }
-  if (sdrag.edge) trimEdge(sdrag, dx * sdrag.perPx * sdrag.c0.r);
-  else moveHint(e);
+  if (sdrag.edge) (sdrag.items0 ? trimFree : trimEdge)(sdrag, dx * sdrag.perPx * sdrag.c0.r);
+  else (sdrag.items0 ? moveFree : moveHint)(e);
 };
 strip.onpointerup = strip.onpointercancel = (e) => {
   const d = sdrag; sdrag = null;
@@ -720,6 +799,12 @@ strip.onpointerup = strip.onpointercancel = (e) => {
     return seekTo(toSrc(eAtX(e.clientX, strip)));
   }
   if (d.edge) { commitEdit(); return; }
+  if (d.items0) {
+    if (d.newAt === undefined || Math.abs(d.newAt - d.at0) < 1e-3) return renderCuts();
+    layout(d.items0.map((it, j) => ({ c: { ...it.c }, at: j === d.me ? d.newAt : it.at })));
+    commitEdit(); seekTo(toSrc(d.newAt + 0.01));
+    return status(`Moved the clip to ${fmt(d.newAt)}. The space it left stays empty.`);
+  }
   if (d.to !== d.i) { const [c] = clips.splice(d.i, 1); clips.splice(d.to, 0, c); commitEdit(); status(`Moved the clip to position ${d.to + 1}.`); }
   else renderCuts();
 };
@@ -747,6 +832,39 @@ function trimEdge(d, dg) {
     renderCuts(); seekTo(c.a);
   }
   touched();
+}
+// the same with clips that stay where they are put: trimming leaves space instead of pulling the next clip along
+function trimFree(d, dg) {
+  const it0 = d.items0[d.me], c0 = it0.c, s = sources[srcOf((c0.a + c0.b) / 2)];
+  const others = d.items0.filter((_, j) => j !== d.me).map((o) => o.c);
+  const items = d.items0.map((it) => ({ c: { ...it.c }, at: it.at })), it = items[d.me];
+  if (d.edge === 'r') {
+    const wall = Math.min(s.off + s.dur, ...others.filter((o) => o.a >= c0.b - 1e-6 && o.a < s.off + s.dur).map((o) => o.a));
+    it.c.b = Math.max(c0.a + 0.1, Math.min(wall, c0.b + dg));
+  } else {
+    const wall = Math.max(s.off, ...others.filter((o) => o.b <= c0.a + 1e-6 && o.b > s.off).map((o) => o.b));
+    it.c.a = Math.min(c0.b - 0.1, Math.max(wall, c0.a + dg));
+    it.at = it0.at + (it.c.a - c0.a) / c0.r;
+  }
+  layout(items); renderCuts(); seekTo(d.edge === 'r' ? it.c.b - 0.01 : it.c.a);
+  touched();
+}
+// dragging a clip anywhere: its edges cling to other clips, the start of the timeline and the edges of voice pieces
+function moveFree(e) {
+  const d = sdrag, tol = 10 * d.perPx;
+  let at = Math.max(0, d.at0 + (e.clientX - d.x0) * d.perPx), snapAt = null;
+  const marks = [0, ...d.items0.filter((_, j) => j !== d.me).flatMap((it) => [it.at, it.at + (it.c.b - it.c.a) / it.c.r]), ...pieces().flatMap((p) => [p.s, p.e])];
+  let best = null;
+  for (const edge of [at, at + d.len]) for (const q of marks) {
+    const gap = Math.abs(q - edge);
+    if (gap < tol && (!best || gap < best.gap)) best = { gap, adj: q - edge, q };
+  }
+  if (best) { at = Math.max(0, at + best.adj); snapAt = best.q; }
+  d.newAt = at;
+  const blk = strip.querySelector(`[data-i="${d.i}"]`);
+  blk.classList.add('dragging'); blk.style.left = pctE(at) + '%';
+  strip.querySelector('.drop')?.remove();
+  if (snapAt !== null) { const line = Object.assign(document.createElement('div'), { className: 'drop' }); line.style.left = pctE(snapAt) + '%'; strip.append(line); }
 }
 // dragging a clip: shows where it would land
 function moveHint(e) {
@@ -937,8 +1055,8 @@ try {
 // captions: the script's words spread over each section's time span
 let capCache = null;
 function captionList() {
-  const key = sections.map((x) => x.start.toFixed(2)).join() + '|' + scriptEl.value.length + '|' + total();
-  if (capCache?.key !== key) capCache = { key, list: buildCaptions(sections, total() || 0) };
+  const key = sections.map((x) => x.start.toFixed(2)).join() + '|' + scriptEl.value.length + '|' + realTotal();
+  if (capCache?.key !== key) capCache = { key, list: buildCaptions(sections, realTotal() || 0) };
   return capCache.list;
 }
 $('srt').onclick = () => {
@@ -1011,15 +1129,15 @@ let sections = []; // { text, w0 (index of its first word), n (word count), star
 const secEl = $('sections');
 const esc = (t) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-const sectionEnd = (i) => (i + 1 < sections.length ? sections[i + 1].start : total() || 0);
+const sectionEnd = (i) => (i + 1 < sections.length ? sections[i + 1].start : realTotal() || 0);
 function sectionAt(t) { let i = 0; while (i + 1 < sections.length && t >= sections[i + 1].start - 1e-6) i++; return i; }
 
 function spreadEvenly() {
   const words = sections.reduce((n, x) => n + x.n, 0) || 1;
   let seen = 0;
-  for (const x of sections) { x.start = (total() || 0) * (seen / words); seen += x.n; }
+  for (const x of sections) { x.start = (realTotal() || 0) * (seen / words); seen += x.n; }
 }
-function saveMarks() { try { localStorage.setItem('marks', JSON.stringify({ n: sections.length, dur: total(), starts: sections.map((x) => x.start) })); } catch {} }
+function saveMarks() { try { localStorage.setItem('marks', JSON.stringify({ n: sections.length, dur: realTotal(), starts: sections.map((x) => x.start) })); } catch {} }
 function loadMarks() {
   try {
     const m = JSON.parse(localStorage.getItem('marks'));
@@ -1046,7 +1164,7 @@ function layoutWords() {
   lastNow = -1; lastSec = -1;
   updateWpm(); renderMarks(); renderSections();
 }
-const wordsPerSec = () => (total() ? spans.length / total() : 2.5);
+const wordsPerSec = () => (realTotal() ? spans.length / realTotal() : 2.5);
 function posAt(t) {
   if (!sections.length) return 0;
   const i = sectionAt(t), x = sections[i], len = sectionEnd(i) - x.start;
@@ -1054,7 +1172,7 @@ function posAt(t) {
   return x.w0 + frac * (x.n - 1);
 }
 function updateWpm() {
-  $('wpm').textContent = spans.length && total() ? `About ${Math.round(wordsPerSec() * speed * 60)} words per minute` : 'Add a script and a video to see the pace.';
+  $('wpm').textContent = spans.length && realTotal() ? `About ${Math.round(wordsPerSec() * speed * 60)} words per minute` : 'Add a script and a video to see the pace.';
 }
 
 function renderMarks() {
@@ -1081,7 +1199,7 @@ secEl.onclick = (e) => {
 function marksChanged(msg) { saveMarks(); renderMarks(); renderSections(); if (msg) status(msg); }
 
 function setStart(i) {
-  const lo = sections[i - 1].start + 0.1, hi = (i + 1 < sections.length ? sections[i + 1].start : total()) - 0.1;
+  const lo = sections[i - 1].start + 0.1, hi = (i + 1 < sections.length ? sections[i + 1].start : realTotal()) - 0.1;
   sections[i].start = Math.max(lo, Math.min(hi, gNow()));
   marksChanged(`Section ${i + 1} now starts at ${fmt(toEdit(sections[i].start))}.`);
 }
@@ -1174,7 +1292,7 @@ async function jumpTo(g) {
     }
     playK = clipIndexAt(gNow());
     if (state.playing) startVoice();
-    if ((state.playing || recLive) && video.paused) await video.play().catch(() => {});
+    if ((state.playing || recLive) && vPaused()) await vPlay().catch(() => {});
   } finally { jumping = false; }
 }
 for (const el of [video, spare]) el.onended = () => { if (el === video && (state.playing || (state.recording && !state.recPaused))) tick(); };
@@ -1452,12 +1570,12 @@ async function startRecording(range = null) {
   state.recording = true; state.recPaused = false; playK = curIdx();
   if (range) recLimit = null;
   beginCapture();
-  await video.play();
+  await vPlay();
   status(range ? `Retaking section ${range.sec + 1}… it stops by itself at the end of the section.` : 'Recording… read the highlighted text. Press M when you start each new section.');
   updateUI();
 }
 function pauseRecording() {
-  video.pause();
+  vPause();
   commitCapture();
   state.recPaused = true;
   status('Paused. Press Play to listen back, scrub to find your trim point, then Trim or Resume from there.');
@@ -1470,14 +1588,14 @@ async function resumeRecording() {
   await ctx.resume();
   state.recPaused = false; playK = curIdx();
   beginCapture();
-  await video.play();
+  await vPlay();
   status('Recording…');
   updateUI();
 }
 function stopRecording() {
   const wasRange = !!state.range;
   stopPlay();
-  video.pause();
+  vPause();
   if (!state.recPaused) commitCapture();
   if (!wasRange) archiveTake(); // a section retake is kept with the section instead
   video.playbackRate = +$('rate').value;
@@ -1581,7 +1699,7 @@ function nearestPause(t0) {
 }
 async function redoLine() {
   if (!state.recording || state.recPaused || jumping) return;
-  const g = gNow(), lines = buildCaptions(sections, total(), Infinity);
+  const g = gNow(), lines = buildCaptions(sections, realTotal(), Infinity);
   if (!lines.length) return status('Add a script first, so the app knows where each sentence starts.');
   let i = lines.findIndex((x) => g >= x.t0 && g < x.t1);
   if (i < 0) i = lines.length - 1;
@@ -1645,12 +1763,12 @@ async function startPlay() {
   video.muted = !$('hear').checked;
   state.playing = true; playK = curIdx();
   startVoice();
-  await video.play();
+  await vPlay();
   updateUI();
 }
 function stopPlay() {
   if (!state.playing) return;
-  stopVoice(); video.pause(); video.playbackRate = +$('rate').value; state.playing = false; updateUI();
+  stopVoice(); vPause(); video.playbackRate = +$('rate').value; state.playing = false; updateUI();
 }
 function stopAll() { if (state.recording) stopRecording(); stopPlay(); }
 const togglePlay = () => (state.playing ? stopPlay() : startPlay());
@@ -1756,7 +1874,7 @@ $('export').onclick = async () => {
       try {
         status('Exporting on this device…');
         const fx = { shape, crop: $('crop').value / 100, captions, intro, outro, zooms };
-        const r = await exportLocally({ sources: sources.map((x) => ({ file: x.file, off: x.off })), voice: finalAudio(true), segs: segs().map((g) => ({ src: g.src, a: g.a - sources[g.src].off, b: g.b - sources[g.src].off, r: g.r })), fx, saveHandle: handle, onProgress: (p) => (btn.textContent = `Exporting ${Math.round(p * 100)}%`) });
+        const r = await exportLocally({ sources: sources.map((x) => ({ file: x.file, off: x.off, blank: !!x.blank })), voice: finalAudio(true), segs: segs().map((g) => ({ src: g.src, a: g.a - sources[g.src].off, b: g.b - sources[g.src].off, r: g.r })), fx, saveHandle: handle, onProgress: (p) => (btn.textContent = `Exporting ${Math.round(p * 100)}%`) });
         blob = r.blob; local = true;
         if (r.audioCodec !== 'aac') note = ' This browser cannot make AAC audio, so the voice is Opus. Most players handle it, but QuickTime and some older devices may not.';
       } catch (e) {
@@ -1814,15 +1932,17 @@ updateUI();
     legacy = meta.length > 0;
   }
   try {
-    for (const m of meta) { const rec = m.file ? { file: m.file } : await kv.get('src-' + m.id); if (rec?.file) await addSource(rec.file, m.id); }
+    for (const m of meta) { if (m.blank) { sources.push({ id: m.id, name: m.name, blank: true, dur: m.dur, off: total() }); continue; } const rec = m.file ? { file: m.file } : await kv.get('src-' + m.id); if (rec?.file) await addSource(rec.file, m.id); }
   } catch { return status('This browser cannot play the saved video any more. Upload it again.'); }
   if (!sources.length) return;
   if (legacy) { kv.set('src-' + sources[0].id, { file: sources[0].file }); saveSources(); kv.del('video'); }
-  clips = sources.map((x) => ({ a: x.off, b: x.off + x.dur, r: 1 }));
+  clips = sources.filter((x) => !x.blank).map((x) => ({ a: x.off, b: x.off + x.dur, r: 1 }));
+  let usedSaved = false;
   try { // the saved edit counts only if it still fits the videos
     const e = JSON.parse(localStorage.getItem('project') || 'null');
-    if (e && Math.abs(e.total - total()) < 0.05 && Array.isArray(e.clips) && e.clips.every((c) => c.b > c.a && c.a >= 0 && c.b <= total() + 0.01)) { clips = e.clips; zooms = (e.zooms || []).filter((z) => z.b > z.a); voiceFree = !!e.voiceFree; vsp = Array.isArray(e.vsp) ? e.vsp : []; syncMode(); }
+    if (e && Math.abs(e.total - total()) < 0.05 && Array.isArray(e.clips) && e.clips.every((c) => c.b > c.a && c.a >= 0 && c.b <= total() + 0.01)) { usedSaved = true; clips = e.clips; zooms = (e.zooms || []).filter((z) => z.b > z.a); voiceFree = !!e.voiceFree; vsp = Array.isArray(e.vsp) ? e.vsp : []; syncMode(); }
   } catch {}
+  if (!usedSaved) sources = sources.filter((x) => !x.blank);
   const take = await kv.get('take');
   if (take?.samples?.length) { state.take = take; rebuildPeaks(take.samples); mixCache = null; }
   state.attempts = (await kv.get('attempts')) || {};
