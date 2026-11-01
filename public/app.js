@@ -252,8 +252,10 @@ const plainEdit = () => sources.length === 1 && clips.every((c, i) => c.r === 1 
 // The timeline can show just part of the edited video, so cuts and trims can be placed precisely.
 // view.len is how many seconds are visible (0 means all of it) and view.s is where the visible part starts.
 let view = { s: 0, len: 0 };
+// with every clip deleted but the voice kept, the timeline still shows the voice so it can be seen (and a new video added under it)
+const extent = () => (voiceFree && hasTake() && editedLen() < 0.05 ? voiceSec() : editedLen());
 function vr() {
-  const L = editedLen() || 1, len = view.len && view.len < L - 1e-6 ? Math.max(0.5, Math.min(L, view.len)) : L;
+  const L = extent() || 1, len = view.len && view.len < L - 1e-6 ? Math.max(0.5, Math.min(L, view.len)) : L;
   return { L, len, s: Math.max(0, Math.min(L - len, view.s)) };
 }
 const pctE = (e) => { const v = vr(); return ((e - v.s) / v.len) * 100; };
@@ -656,7 +658,7 @@ function deleteClip() {
   if (k < 0) return;
   const c = clips[k], at = toEdit(c.a);
   checkpoint(); clips.splice(k, 1); commitEdit();
-  if (!clips.length) { seekTo(0); return status('Everything was deleted. Press Undo (Ctrl+Z) to bring it back.'); }
+  if (!clips.length) { seekTo(0); return status(voiceFree ? 'The video is gone and your voice is kept. Click "+ Add video" to put a new video under it, or Undo (Ctrl+Z) to bring the old one back.' : 'Everything was deleted, voice included. Press Undo (Ctrl+Z) to bring it back.'); }
   seekTo(toSrc(Math.min(at, editedLen() - 0.01)));
   status(`Deleted the clip (${((c.b - c.a) / c.r).toFixed(1)}s).${overrunNote()}`);
 }
@@ -955,7 +957,7 @@ function drawWave() {
   const g = canvas.getContext('2d'), W = canvas.width, H = canvas.height;
   g.clearRect(0, 0, W, H);
   const v = vr();
-  if (!editedLen() || !W) { renderPieces(); return; }
+  if (!extent() || !W) { renderPieces(); return; }
   const perPx = v.len / W; // seconds of edited video per pixel
   if (ctx || peaks.length) {
     const rate = state.take?.rate || ctx?.sampleRate || 48000;
