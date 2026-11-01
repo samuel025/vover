@@ -431,6 +431,71 @@ function blankWorkspace() {
   showProject('Blank workspace. Drop a video here or click browse to begin.');
 }
 $('newProject').onclick = blankWorkspace;
+
+// ---------- save and open a whole workspace ----------
+// One file holds everything: a header (settings, edits, script) followed by the video files, the voice and the music, side by side.
+// Blobs are joined without being read into memory, so large videos are fine. Opening writes it all into the browser's own storage and reloads,
+// which runs the same restore path as coming back to the page.
+const WS_MAGIC = 'VOVER1\n';
+const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+async function saveWorkspace() {
+  if (!sources.length) return status('There is nothing to save yet. Add a video first.');
+  stopAll();
+  let handle = null;
+  try {
+    if (window.showSaveFilePicker) handle = await window.showSaveFilePicker({ suggestedName: 'workspace.vover', types: [{ description: 'Voiceover workspace', accept: { 'application/octet-stream': ['.vover'] } }] });
+  } catch (e) { if (e.name === 'AbortError') return; }
+  status('Saving the workspace…');
+  try {
+    const parts = [], blobs = [];
+    const add = (name, blob, extra = {}) => { parts.push({ name, len: blob.size, ...extra }); blobs.push(blob); };
+    for (const x of sources) if (!x.blank) add('src:' + x.id, x.file, { type: x.file.type, fname: x.file.name });
+    if (hasTake()) add('take', new Blob([state.take.samples]));
+    for (const t of takes) add('take:' + t.id, new Blob([t.samples]));
+    const mus = await kv.get('music');
+    if (mus?.file) add('music', mus.file, { type: mus.file.type, fname: mus.file.name });
+    const head = {
+      v: 1, sources: sources.map(({ id, name, dur, blank }) => ({ id, name, dur, blank })), project: JSON.stringify({ total: total(), clips, zooms, voiceFree, vsp }),
+      script: scriptEl.value, marks: lsGet('marks'), fx: lsGet('fx'), takeRate: state.take?.rate, takeCounter,
+      takes: takes.map(({ id, name, stars, at, rate, free }) => ({ id, name, stars, at, rate, free })), parts,
+    };
+    const enc = new TextEncoder().encode(JSON.stringify(head));
+    const out = new Blob([WS_MAGIC, new Uint8Array(new Uint32Array([enc.length]).buffer), enc, ...blobs]);
+    if (handle) await out.stream().pipeTo(await handle.createWritable());
+    else Object.assign(document.createElement('a'), { href: URL.createObjectURL(out), download: 'workspace.vover' }).click();
+    status(`Workspace saved (${(out.size / 1e6).toFixed(0)} MB). Use Open workspace to bring it back, on this computer or another.`);
+  } catch (e) { status('Could not save the workspace: ' + e.message); }
+}
+async function openWorkspace(file) {
+  if (!file) return;
+  stopAll();
+  try {
+    const dec = new TextDecoder(), top = new Uint8Array(await file.slice(0, 11).arrayBuffer());
+    if (dec.decode(top.slice(0, 7)) !== WS_MAGIC) return status('That is not a workspace file saved from here.');
+    const hl = new DataView(top.buffer).getUint32(7, true), h = JSON.parse(dec.decode(await file.slice(11, 11 + hl).arrayBuffer()));
+    if (sources.length && !confirm('Open this workspace? What is on screen now is replaced (save it first if you want to keep it).')) return;
+    status('Opening the workspace…');
+    const blobs = {}; let at = 11 + hl;
+    for (const p of h.parts) { blobs[p.name] = { blob: file.slice(at, at + p.len, p.type || ''), p }; at += p.len; }
+    // clear what is stored now, then store the workspace
+    for (const x of (await kv.get('sources')) || []) kv.del('src-' + x.id);
+    for (const x of ((await kv.get('takes'))?.list) || []) kv.del('take-' + x.id);
+    for (const k of ['take', 'attempts', 'music', 'draft', 'video']) await kv.del(k);
+    clearTimeout(takeTimer); takeTimer = 0; state.take = null; // a pending save of the old voice must not overwrite this one
+    const fileOf = ({ blob, p }) => new File([blob], p.fname || 'file', { type: p.type || '' });
+    await kv.set('sources', h.sources);
+    for (const x of h.sources) if (!x.blank) await kv.set('src-' + x.id, { file: fileOf(blobs['src:' + x.id]) });
+    if (blobs.take) await kv.set('take', { samples: new Float32Array(await blobs.take.blob.arrayBuffer()), rate: h.takeRate });
+    for (const t of h.takes || []) if (blobs['take:' + t.id]) await kv.set('take-' + t.id, { samples: new Float32Array(await blobs['take:' + t.id].blob.arrayBuffer()) });
+    await kv.set('takes', { n: h.takeCounter || 0, list: h.takes || [] });
+    if (blobs.music) await kv.set('music', { file: fileOf(blobs.music) });
+    const ls = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} };
+    ls('project', h.project); ls('script', h.script); ls('marks', h.marks); ls('fx', h.fx);
+    location.reload();
+  } catch (e) { status('Could not open that file: ' + e.message); }
+}
+$('saveWs').onclick = saveWorkspace;
+$('openWs').onchange = (e) => { openWorkspace(e.target.files[0]); e.target.value = ''; };
 $('addFile').onchange = (e) => { addVideo(e.target.files[0]); e.target.value = ''; };
 
 // undo / redo: a snapshot is the clips, the videos and the recorded voice (the voice arrays are never changed in place, so keeping them is cheap)

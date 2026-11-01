@@ -14,6 +14,7 @@ Record a voiceover over any video in one browser tab. Upload a video, paste your
 - New project clears everything and gives a blank workspace
 - Zoomable timeline with a time ruler: + / - buttons or keys, Ctrl + scroll, double-click a clip to zoom to it, scroll bar to move along, follows the playhead while playing
 - Video-only edits: set "Edits change" to "video only" and cuts, deletes, moves and speed changes leave your recorded voice exactly where it is on the timeline (switching back re-attaches it to the video)
+- Save workspace / Open workspace: one `.vover` file holds your videos, recording, takes, music, edits, script and settings, so you can come back later or move to another computer (the app also remembers your last workspace automatically in this browser)
 - Voice-only edits: set "Edits change" to "voice only" to cut, split and delete just the recording. Cuts leave silence (no ripple), the voice shows as pieces you can drag, and a piece snaps to the edges of its neighbours so gaps close cleanly
 - A clip strip above the waveform: drag a clip's edge to trim it, drag a clip to move it, click to select it
 - Combine several videos on one timeline and narrate across them (+ Add video, or drop more videos on the page)
