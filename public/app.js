@@ -252,8 +252,8 @@ const plainEdit = () => sources.length === 1 && clips.every((c, i) => c.r === 1 
 // The timeline can show just part of the edited video, so cuts and trims can be placed precisely.
 // view.len is how many seconds are visible (0 means all of it) and view.s is where the visible part starts.
 let view = { s: 0, len: 0 };
-// with every clip deleted but the voice kept, the timeline still shows the voice so it can be seen (and a new video added under it)
-const extent = () => (voiceFree && hasTake() && editedLen() < 0.05 ? voiceSec() : editedLen());
+// with the voice on its own track the timeline is as long as the longer of the video and the voice, so no voice is ever hidden
+const extent = () => (voiceFree && hasTake() ? Math.max(editedLen(), voiceSec()) : editedLen());
 function vr() {
   const L = extent() || 1, len = view.len && view.len < L - 1e-6 ? Math.max(0.5, Math.min(L, view.len)) : L;
   return { L, len, s: Math.max(0, Math.min(L - len, view.s)) };
@@ -524,7 +524,7 @@ function magnet(p, d, tol) {
 let adrag = null;
 function renderPieces() {
   const lane = $('alane');
-  const on = voiceFree && hasTake() && !state.recording && editedLen() > 0;
+  const on = voiceFree && hasTake() && !state.recording && extent() > 0;
   lane.hidden = !on;
   if (!on) { lane.innerHTML = ''; return; }
   const v = vr();
