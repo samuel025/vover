@@ -13,7 +13,7 @@ let base = new Float32Array(0), chunks = [], chunkLen = 0, capturing = false;
 let spans = [], lastNow = -1, lastSec = -1;
 let speed = 1;
 let capStart = 0, draft = null;
-let cutStart = null, editVer = 0, history = [], future = [], music = null, musicId = 0, takes = [], playK = -1, voiceFree = false, zooms = [], zsel = null, pick = null, zoomDirty = false, vsp = [], asel = null, editVoice = false;
+let cutStart = null, editVer = 0, history = [], future = [], music = null, musicId = 0, takes = [], playK = -1, voiceFree = true, selTrack = 'video', zooms = [], zsel = null, pick = null, zoomDirty = false, vsp = [], asel = null, editVoice = false;
 let cleaned = null, cleaning = null, finalCache = {}, abCache = null, lastClipKey = '', lastCap = null;
 
 const B = 1024; // samples per waveform bucket
@@ -300,7 +300,7 @@ $('tscroll').onpointerup = $('tscroll').onpointercancel = () => { barDrag = null
 
 function newProject() {
   discardTake();
-  view = { s: 0, len: 0 }; voiceFree = false; vsp = []; asel = null; syncMode(); sources = []; clips = []; zooms = []; zsel = null; pick = null; loaded = -1; takes = []; cutStart = null; history = []; future = []; touched();
+  view = { s: 0, len: 0 }; voiceFree = true; vsp = []; asel = null; syncMode(); sources = []; clips = []; zooms = []; zsel = null; pick = null; loaded = -1; takes = []; cutStart = null; history = []; future = []; touched();
   try { localStorage.removeItem('project'); localStorage.removeItem('marks'); } catch {}
   kv.get('sources').then((m) => { for (const x of m || []) kv.del('src-' + x.id); kv.del('video'); }).then(() => kv.del('takes'));
 }
@@ -524,7 +524,7 @@ function magnet(p, d, tol) {
 let adrag = null;
 function renderPieces() {
   const lane = $('alane');
-  const on = editVoice && hasTake() && !state.recording && editedLen() > 0;
+  const on = voiceFree && hasTake() && !state.recording && editedLen() > 0;
   lane.hidden = !on;
   if (!on) { lane.innerHTML = ''; return; }
   const v = vr();
@@ -538,7 +538,7 @@ $('alane').onpointerdown = (e) => {
   if (!el || !canSeek()) return;
   e.stopPropagation();
   const p = pieces()[+el.dataset.i];
-  asel = { s: p.s, e: p.e };
+  asel = { s: p.s, e: p.e }; selTrack = 'voice';
   lane.querySelectorAll('.ablk').forEach((b) => b.classList.toggle('sel', b === el));
   adrag = { p, el, x0: e.clientX, perPx: vr().len / lane.getBoundingClientRect().width, d: 0, moved: false };
   addEventListener('pointermove', amove); addEventListener('pointerup', aup); addEventListener('pointercancel', aup);
@@ -653,7 +653,7 @@ function splitHere() {
 }
 function deleteClip() {
   if (!canSeek()) return;
-  if (editVoice) return voiceDelete();
+  if (editVoice || (voiceFree && selTrack === 'voice')) return voiceDelete(); // the voice piece was the last thing clicked
   const k = curIdx();
   if (k < 0) return;
   const c = clips[k], at = toEdit(c.a);
@@ -692,6 +692,7 @@ let sdrag = null;
 const edgeAt = (blk, x) => { const r = blk.getBoundingClientRect(); return r.width < 18 ? null : x - r.left < 7 ? 'l' : r.right - x < 7 ? 'r' : null; };
 strip.onpointerdown = (e) => {
   const blk = e.target.closest('.blk');
+  if (blk) { selTrack = 'video'; if (asel) { asel = null; renderPieces(); } } // Delete now acts on the video clip
   if (!blk || !canSeek() || editVoice) return; // with voice-only edits the clips just move the playhead
   e.stopPropagation();
   strip.setPointerCapture(e.pointerId);
@@ -961,7 +962,7 @@ function drawWave() {
   const perPx = v.len / W; // seconds of edited video per pixel
   if (ctx || peaks.length) {
     const rate = state.take?.rate || ctx?.sampleRate || 48000;
-    g.fillStyle = editVoice ? '#00000000' : '#ffb88e26';
+    g.fillStyle = voiceFree ? '#00000000' : '#ffb88e26';
     const vsec = (peaks.length * B) / rate, end = (((voiceFree ? vsec : toEdit(Math.min(total(), vsec))) - v.s) / v.len) * W;
     g.fillRect(0, 0, Math.max(0, Math.min(W, end)), H);
     g.fillStyle = '#f08a4b';
@@ -970,7 +971,7 @@ function drawWave() {
       if (b0 >= peaks.length) break;
       let mx = 0;
       for (let b = b0; b < b1 && b < peaks.length; b++) mx = Math.max(mx, peaks[b]);
-      if (editVoice && mx === 0) continue; // a gap is left empty
+      if (voiceFree && mx === 0) continue; // a gap is left empty
       const h = Math.max(2 * dpr, Math.min(1, mx * 1.6) * H * 0.9);
       g.fillRect(x, (H - h) / 2, 1, h);
     }
