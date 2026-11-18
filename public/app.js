@@ -1079,6 +1079,7 @@ function placeOverlay(c) {
   const full = w / (1 - b.cl - b.cr), fullH = (full * vh) / vw; // the whole picture, of which the box shows a part
   Object.assign(ov.style, { width: full + 'px', height: fullH + 'px', left: -b.cl * full + 'px', top: -b.ct * fullH + 'px' });
   $('ovbox').classList.toggle('crop', ovCrop);
+  $('ovbox').classList.toggle('tools-in', F.y + b.y * F.h < 32); // near the top of the picture the buttons go inside the overlay so they are not cut off
 }
 function syncOverlay() {
   const e = toEdit(gNow()), c = activeOv(), box = $('ovbox');

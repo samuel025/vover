@@ -257,7 +257,7 @@ body.app .stage>*:not(.video-wrap){flex:none}
 #ovbox:hover .ovh.c,#ovbox:not(.crop) .ovh.c{display:block}
 #ovbox.crop .ovh.c{display:none}
 #ovbox.crop .ovh.e{display:block;background:#ffb88e}
-.ovtools{position:absolute;left:0;top:-26px;display:none;gap:4px}
-#ovbox:hover .ovtools{display:flex}
+.ovtools{position:absolute;left:0;top:-28px;display:flex;gap:4px;padding-bottom:6px}
+#ovbox.tools-in .ovtools{top:4px;left:4px;padding:0}
 .ovtools button{font:600 11px Inter;padding:3px 8px;border:0;border-radius:6px;background:#171717;color:#fff;cursor:pointer}
 .ovtools button:hover{background:#333}
