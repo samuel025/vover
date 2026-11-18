@@ -958,9 +958,11 @@ const asItems = () => ovl.map((c) => ({ ...c }));
 async function addOverlay(file) {
   if (!file) return;
   if (!sources.length) return status('Add the main video first, then an overlay on top of it.');
-  if (!voiceFree) return status('Overlays need "Edits change" set to "video and voice separate".');
   if (state.recording && !state.recPaused) return status('Stop recording first.');
   stopPlay();
+  let switched = false;
+  if (!voiceFree) { $('editMode').value = 'video'; $('editMode').dispatchEvent(new Event('change')); switched = voiceFree; } // overlays need the voice on its own track
+  if (!voiceFree) return status('Overlays need "Edits change" set to "video and voice separate".');
   try {
     const { dur, url } = await probe(file), s = { id: crypto.randomUUID(), name: file.name, file, url, dur };
     checkpoint();
@@ -969,7 +971,7 @@ async function addOverlay(file) {
     osel = { o: osources.length - 1, a: 0 }; selTrack = 'overlay';
     kv.set('osrc-' + s.id, { file }); saveOSources();
     commitEdit(); updateUI();
-    status(`Added ${file.name} on the overlay track at the playhead. Drag it, trim its edges, split it (B) or delete it. Size and corner are in Picture & text.`);
+    status(`${switched ? 'Switched to "video and voice separate", which overlays need. ' : ''}Added ${file.name} on the overlay track at the playhead. Drag it, trim its edges, split it (B) or delete it. Size and corner are in Picture & text.`);
   } catch { status('This browser cannot play that video. Try an MP4 (H.264) or WebM file.'); }
 }
 $('ovFile').onchange = (e) => { addOverlay(e.target.files[0]); e.target.value = ''; };
