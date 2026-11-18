@@ -23,7 +23,7 @@
 
 <main class="layout">
   <section class="stage card">
-    <div class="video-wrap" id="videoWrap">
+    <div class="stagebox" id="stagebox"><div class="video-wrap" id="videoWrap">
       <div class="empty" id="empty">
         <div class="empty-icon">▶</div>
         <p>Drop a video here or <label for="file" class="link">browse</label></p>
@@ -42,7 +42,7 @@
       <div class="zdot b" id="zdotB" hidden title="Where the zoom ends"></div>
       <div class="countdown" id="countdown" hidden></div>
       <div class="badge" id="badge" hidden><i></i><span id="badgeText">REC</span></div>
-    </div>
+    </div></div>
 
     <div class="times"><span id="cur">0:00.0</span>
       <span class="tzoom"><button id="tzOut" class="btn sm icon" title="Zoom the timeline out (-)">−</button><span id="tzLevel" class="sub">Fit</span><button id="tzIn" class="btn sm icon" title="Zoom the timeline in (+). Ctrl + scroll also zooms, double-click a clip to zoom to it">+</button><button id="tzFit" class="btn sm" title="Show the whole timeline (0)">Fit</button></span>
@@ -198,8 +198,12 @@
       <div class="panel" data-panel="picture" hidden>
     <section class="card opts">
       <h2>Picture &amp; text</h2>
-      <label class="row">Shape
-        <select id="shape"><option value="original">Original</option><option value="vertical">Vertical 9:16</option><option value="square">Square 1:1</option></select>
+      <label class="row">Aspect ratio
+        <select id="shape"><option value="original">Same as the video</option><option value="16:9">16:9 (YouTube)</option><option value="9:16">9:16 (Reels, TikTok, Shorts)</option><option value="1:1">1:1 (square)</option><option value="4:5">4:5 (Instagram post)</option><option value="4:3">4:3</option><option value="3:4">3:4</option><option value="21:9">21:9 (wide)</option><option value="custom">Custom…</option></select>
+      </label>
+      <label class="row" id="customRow" hidden>Custom ratio <span><input id="shapeW" type="number" min="1" max="99" step="0.1" value="16" /> : <input id="shapeH" type="number" min="1" max="99" step="0.1" value="9" /></span></label>
+      <label class="row" id="fitRow" hidden>Picture
+        <select id="fit"><option value="fill">Fill the frame (crop the edges)</option><option value="fit">Show all of it (black bars)</option></select>
       </label>
       <label class="row" id="cropRow" hidden>Crop position <input id="crop" type="range" min="0" max="100" value="50" /></label>
       <label class="row">New overlay size <select id="ovSize"><option value="25">25%</option><option value="35" selected>35%</option><option value="50">50%</option><option value="75">75%</option><option value="100">Fill the frame</option></select></label>

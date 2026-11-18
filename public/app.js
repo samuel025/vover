@@ -364,8 +364,8 @@ function newProject() {
   kv.get('sources').then((m) => { for (const x of m || []) kv.del('src-' + x.id); kv.del('video'); }).then(() => kv.get('osources')).then((m) => { for (const x of m || []) kv.del('osrc-' + x.id); kv.del('osources'); }).then(() => kv.del('takes'));
 }
 async function addSource(file, id) {
-  const { dur, url } = await probe(file);
-  const s = { id: id || crypto.randomUUID(), name: file.name, file, url, dur, off: total() };
+  const { dur, url, vw, vh } = await probe(file);
+  const s = { id: id || crypto.randomUUID(), name: file.name, file, url, dur, vw, vh, off: total() };
   sources.push(s);
   return s;
 }
@@ -376,7 +376,7 @@ async function showProject(msg) {
   state.file = sources[0]?.file || null;
   video.hidden = spare.hidden = !sources.length; $('empty').hidden = !!sources.length;
   await gSeek(clips.length ? clips[0].a : 0);
-  touched(); layoutWords(); renderCuts(); renderTakes(); renderZooms(); updateUI();
+  applyShape(); touched(); layoutWords(); renderCuts(); renderTakes(); renderZooms(); updateUI();
   if (msg) status(msg);
 }
 // Starts a new project from one video.
@@ -1052,7 +1052,7 @@ $('ostrip').onpointerup = $('ostrip').onpointercancel = (e) => {
 const ov = $('ovideo');
 function overlayFrame() { // the part of the player the picture fills, in pixels
   const W = wrap.clientWidth, H = wrap.clientHeight, r = pictureRect();
-  return $('shape').value === 'original' && r ? { x: r.ox, y: r.oy, w: r.pw, h: r.ph } : { x: 0, y: 0, w: W, h: H };
+  return ratioOf() === null && r ? { x: r.ox, y: r.oy, w: r.pw, h: r.ph } : { x: 0, y: 0, w: W, h: H };
 }
 // Where an overlay clip sits: x, y and w are fractions of the picture (w is its width), cl/ct/cr/cb are how much is cropped off each side.
 // New clips start from the size and corner chosen in Picture & text.
@@ -1165,7 +1165,7 @@ function moveHint(e) {
 function pictureRect() {
   const W = video.clientWidth, H = video.clientHeight, vw = video.videoWidth, vh = video.videoHeight;
   if (!vw || !W) return null;
-  const cover = $('shape').value !== 'original', k = cover ? Math.max(W / vw, H / vh) : Math.min(W / vw, H / vh);
+  const cover = coverMode(), k = cover ? Math.max(W / vw, H / vh) : Math.min(W / vw, H / vh);
   const pw = vw * k, ph = vh * k;
   return { pw, ph, ox: cover ? (W - pw) * ($('crop').value / 100) : (W - pw) / 2, oy: (H - ph) / 2 };
 }
@@ -1308,13 +1308,23 @@ $('musicFile').onchange = (e) => { if (e.target.files[0]) loadMusic(e.target.fil
 $('musicOff').onclick = () => { music = null; kv.del('music'); $('musicName').textContent = ''; $('musicOpts').hidden = true; touched(); updateUI(); };
 
 // ---------- picture & text settings ----------
-const fxIds = ['denoise', 'norm', 'eq', 'deess', 'fade', 'mvol', 'duck', 'shape', 'crop', 'caps', 'introText', 'introSec', 'outroText', 'outroSec', 'ovSize', 'ovPos'];
+const fxIds = ['denoise', 'norm', 'eq', 'deess', 'fade', 'mvol', 'duck', 'shape', 'shapeW', 'shapeH', 'fit', 'crop', 'caps', 'introText', 'introSec', 'outroText', 'outroSec', 'ovSize', 'ovPos'];
+// The shape of the project: the video's own, or a chosen aspect ratio that the picture fills (edges cropped) or sits inside (bars).
+function ratioOf() {
+  const v = $('shape').value;
+  if (v === 'original') return null;
+  const [w, h] = v === 'custom' ? [+$('shapeW').value, +$('shapeH').value] : v.split(':').map(Number);
+  return w > 0 && h > 0 ? w / h : null;
+}
+const coverMode = () => ratioOf() !== null && $('fit').value !== 'fit';
 function applyShape() {
-  const sh = $('shape').value;
-  wrap.classList.toggle('shape-vertical', sh === 'vertical');
-  wrap.classList.toggle('shape-square', sh === 'square');
+  const ar = ratioOf(), first = sources.find((x) => !x.blank), own = first?.vw && first?.vh ? first.vw / first.vh : video.videoWidth ? video.videoWidth / video.videoHeight : 16 / 9;
+  wrap.style.setProperty('--ar', String(ar ?? own));
+  wrap.classList.toggle('cover', coverMode());
   wrap.style.setProperty('--crop', $('crop').value + '%');
-  $('cropRow').hidden = sh === 'original';
+  $('customRow').hidden = $('shape').value !== 'custom';
+  $('fitRow').hidden = ar === null;
+  $('cropRow').hidden = !coverMode();
 }
 for (const id of fxIds) {
   $(id).addEventListener('change', () => {
@@ -1325,8 +1335,10 @@ for (const id of fxIds) {
   });
 }
 $('crop').addEventListener('input', applyShape);
+for (const id of ['shapeW', 'shapeH']) $(id).addEventListener('input', applyShape);
 try {
   const f = JSON.parse(localStorage.getItem('fx') || 'null');
+  if (f?.shape === 'vertical') f.shape = '9:16'; else if (f?.shape === 'square') f.shape = '1:1'; // saved before the ratio list existed
   if (f) for (const k of fxIds) if (k in f) { if ($(k).type === 'checkbox') $(k).checked = f[k]; else $(k).value = f[k]; }
 } catch {}
 
@@ -2141,9 +2153,9 @@ $('export').onclick = async () => {
   btn.disabled = true; btn.textContent = 'Exporting…';
   try {
     await ensureClean();
-    const shape = $('shape').value, captions = $('caps').checked ? captionList() : null, intro = titleCard('intro'), outro = titleCard('outro');
+    const ratio = ratioOf(), captions = $('caps').checked ? captionList() : null, intro = titleCard('intro'), outro = titleCard('outro');
     // these edits are drawn onto every frame, so only a browser that can encode video can do them (the server only handles cuts)
-    const heavy = !!(captions?.length || intro || outro || shape !== 'original' || zooms.length || !plainEdit());
+    const heavy = !!(captions?.length || intro || outro || ratio !== null || zooms.length || !plainEdit());
     let blob = null, local = false, note = '';
     if ($('keep').checked) {
       if (heavy) throw new Error('Keeping the original audio cannot be combined with speed changes, moved clips, several videos, captions, titles zooms or cropping. Turn one off.');
@@ -2151,7 +2163,7 @@ $('export').onclick = async () => {
     } else {
       try {
         status('Exporting on this device…');
-        const fx = { shape, crop: $('crop').value / 100, captions, intro, outro, zooms };
+        const fx = { ratio, fit: $('fit').value, crop: $('crop').value / 100, captions, intro, outro, zooms };
         const r = await exportLocally({ sources: sources.map((x) => ({ file: x.file, off: x.off, blank: !!x.blank })), voice: finalAudio(true), overlay: ovl.length ? { clips: ovl.map((c) => ({ file: osources[c.o].file, a: c.a, b: c.b, at: c.at, box: { ...ovBoxOf(c) } })) } : null, segs: segs().map((g) => ({ src: g.src, a: g.a - sources[g.src].off, b: g.b - sources[g.src].off, r: g.r })), fx, saveHandle: handle, onProgress: (p) => (btn.textContent = `Exporting ${Math.round(p * 100)}%`) });
         blob = r.blob; local = true;
         if (r.audioCodec !== 'aac') note = ' This browser cannot make AAC audio, so the voice is Opus. Most players handle it, but QuickTime and some older devices may not.';

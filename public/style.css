@@ -134,9 +134,8 @@ kbd{font:500 11px Inter;border:1px solid var(--border);border-bottom-width:2px;b
 .cuts b.spd{position:absolute;top:0;bottom:0;background:repeating-linear-gradient(135deg,#7c9cff22 0 6px,#7c9cff11 6px 12px);font:600 11px Inter;color:#3f55b8;padding:3px 5px;box-sizing:border-box;pointer-events:none;border-left:1px solid #7c9cff;border-right:1px solid #7c9cff;overflow:hidden}
 .caption{position:absolute;left:8%;right:8%;bottom:7%;text-align:center;color:#fff;font:600 clamp(14px,2.2vw,26px) Inter,sans-serif;text-shadow:0 1px 3px #000;pointer-events:none;z-index:2}
 .caption span{background:#000000b3;padding:2px 8px;border-radius:6px;box-decoration-break:clone;-webkit-box-decoration-break:clone}
-.video-wrap.shape-vertical{aspect-ratio:9/16;min-height:0;width:calc((100vh - 330px) * 9 / 16);max-width:100%;margin-inline:auto}
-.video-wrap.shape-square{aspect-ratio:1;min-height:0;width:calc(100vh - 330px);max-width:100%;margin-inline:auto}
-.video-wrap.shape-vertical video,.video-wrap.shape-square video{object-fit:cover;object-position:var(--crop,50%) 50%}
+.video-wrap.cover video{object-fit:cover;object-position:var(--crop,50%) 50%}
+.stagebox{display:flex;align-items:center;justify-content:center}
 .music{display:flex;flex-direction:column;gap:8px;align-items:flex-start}
 .music label.btn{cursor:pointer}
 .opts input[type=text]{width:60%;height:30px;border:1px solid var(--border);border-radius:8px;padding:0 8px;font:13px Inter}
@@ -186,10 +185,10 @@ body.app{height:100vh;overflow:hidden;display:flex;flex-direction:column}
 body.app .bar{position:static;flex:none;padding:8px 20px}
 body.app .layout{flex:1;min-height:0;max-width:none;width:100%;margin:0;padding:12px 16px;gap:12px;grid-template-columns:minmax(0,1fr) 400px;align-items:stretch}
 body.app .stage{min-height:0;align-self:stretch;padding:12px;gap:8px;overflow:hidden}
-body.app .video-wrap{flex:1 1 0;min-height:120px;aspect-ratio:auto;max-height:none;width:100%}
-body.app .video-wrap.shape-vertical{flex:1 1 0;aspect-ratio:9/16;width:auto;max-width:100%;min-height:0;align-self:center}
-body.app .video-wrap.shape-square{flex:1 1 0;aspect-ratio:1;width:auto;max-width:100%;min-height:0;align-self:center}
-body.app .stage>*:not(.video-wrap){flex:none}
+body.app .stagebox{flex:1 1 0;min-height:120px;width:100%;container-type:size}
+/* the player takes the largest size of the chosen shape that fits the space */
+body.app .video-wrap{flex:none;width:min(100cqw,calc(100cqh * var(--ar,1.7778)));aspect-ratio:var(--ar,1.7778);height:auto;min-height:0;max-height:none}
+body.app .stage>*:not(.stagebox){flex:none}
 .side{display:flex;flex-direction:column;min-height:0;overflow:hidden;padding:0}
 .tabs{display:flex;gap:2px;padding:8px 10px;border-bottom:1px solid var(--border);flex:none}
 .tabs button{flex:1;border:0;background:transparent;padding:6px 4px;border-radius:999px;font:500 13px Inter;color:var(--sub);cursor:pointer}
@@ -208,7 +207,8 @@ body.app .stage>*:not(.video-wrap){flex:none}
   body.app{height:auto;overflow:auto;display:block}
   body.app .layout{display:block}
   body.app .stage{overflow:visible;margin-bottom:12px}
-  body.app .video-wrap{aspect-ratio:16/9;min-height:240px}
+  body.app .stagebox{container-type:normal;flex:none;display:block}
+  body.app .video-wrap{width:100%;aspect-ratio:var(--ar,1.7778);min-height:0}
   .side{overflow:visible}.panels{position:static}.panel{position:static;overflow:visible}
   .panel[data-panel=script]{overflow:visible}.prompter-card textarea,.prompter-card .prompter,.prompter-card .sections{height:320px;flex:none}
 }
@@ -261,3 +261,4 @@ body.app .stage>*:not(.video-wrap){flex:none}
 #ovbox.tools-in .ovtools{top:4px;left:4px;padding:0}
 .ovtools button{font:600 11px Inter;padding:3px 8px;border:0;border-radius:6px;background:#171717;color:#fff;cursor:pointer}
 .ovtools button:hover{background:#333}
+#shapeW,#shapeH{width:56px;height:30px;border:1px solid var(--border);border-radius:8px;padding:0 6px;font:13px Inter}

@@ -14,6 +14,7 @@ Record a voiceover over any video in one browser tab. Upload a video, paste your
 - New project clears everything and gives a blank workspace
 - Zoomable timeline with a time ruler: + / - buttons or keys, Ctrl + scroll, double-click a clip to zoom to it, scroll bar to move along, follows the playhead while playing
 - Video-only edits: set "Edits change" to "video only" and cuts, deletes, moves and speed changes leave your recorded voice exactly where it is on the timeline (switching back re-attaches it to the video)
+- Aspect ratio: choose the project shape (16:9, 9:16, 1:1, 4:5, 4:3, 3:4, 21:9 or your own ratio); the picture fills it (crop position adjustable) or sits inside it with black bars, in the player and in the export
 - Overlay track: put a second video on top of the main one (a window in a corner, or filling the frame) and cut, split, move and trim it on its own track; it is drawn into the export
 - Save workspace / Open workspace: one `.vover` file holds your videos, recording, takes, music, edits, script and settings, so you can come back later or move to another computer (the app also remembers your last workspace automatically in this browser)
 - Voice-only edits: set "Edits change" to "voice only" to cut, split and delete just the recording. Cuts leave silence (no ripple), the voice shows as pieces you can drag, and a piece snaps to the edges of its neighbours so gaps close cleanly
