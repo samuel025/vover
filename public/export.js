@@ -175,15 +175,10 @@ export async function exportLocally({ sources, voice, segs, overlay = null, fx =
       c.cur?.close(); c.cur = c.nxt; c.nxt = null;
     }
     if (!c.cur) return;
-    const dw = c.tr.video.displayWidth, dh = c.tr.video.displayHeight;
-    let w = outW * overlay.size, h = (w * dh) / dw, x, y;
-    if (overlay.size >= 0.99) { const k = Math.min(outW / dw, outH / dh); w = dw * k; h = dh * k; x = (outW - w) / 2; y = (outH - h) / 2; }
-    else {
-      const m = outW * 0.03, pos = overlay.pos;
-      x = pos.includes('l') ? m : pos === 'c' ? (outW - w) / 2 : outW - w - m;
-      y = pos.includes('t') ? m : pos === 'c' ? (outH - h) / 2 : outH - h - m;
-    }
-    c.cur.draw(g, 0, 0, dw, dh, x, y, w, h);
+    const dw = c.tr.video.displayWidth, dh = c.tr.video.displayHeight, bx = c.box;
+    const sx = bx.cl * dw, sy = bx.ct * dh, sw = dw * (1 - bx.cl - bx.cr), sh = dh * (1 - bx.ct - bx.cb); // the part that is not cropped away
+    const w = bx.w * outW, h = (w * sh) / sw, x = bx.x * outW, y = bx.y * outH;
+    c.cur.draw(g, sx, sy, sw, sh, x, y, w, h);
   };
 
   const encodeVideo = async () => {

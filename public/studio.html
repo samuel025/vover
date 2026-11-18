@@ -31,7 +31,12 @@
       </div>
       <video id="video" playsinline muted preload="auto" hidden></video>
       <video id="video2" playsinline muted preload="auto" hidden></video>
-      <video id="ovideo" playsinline muted preload="auto" hidden></video>
+      <div id="ovbox" hidden title="Drag to move the overlay, drag a corner to resize it">
+        <div class="ovclip"><video id="ovideo" playsinline muted preload="auto"></video></div>
+        <i class="ovh c" data-h="tl"></i><i class="ovh c" data-h="tr"></i><i class="ovh c" data-h="bl"></i><i class="ovh c" data-h="br"></i>
+        <i class="ovh e h" data-h="t"></i><i class="ovh e h" data-h="b"></i><i class="ovh e v" data-h="l"></i><i class="ovh e v" data-h="r"></i>
+        <span class="ovtools"><button data-t="crop" title="Crop the overlay: drag its edges">Crop</button><button data-t="fill" title="Make the overlay as big as the picture">Fill</button><button data-t="reset" title="Back to the starting size and corner">Reset</button></span>
+      </div>
       <div class="caption" id="caption" hidden></div>
       <div class="zdot a" id="zdotA" hidden title="Where the zoom starts"></div>
       <div class="zdot b" id="zdotB" hidden title="Where the zoom ends"></div>
@@ -197,8 +202,8 @@
         <select id="shape"><option value="original">Original</option><option value="vertical">Vertical 9:16</option><option value="square">Square 1:1</option></select>
       </label>
       <label class="row" id="cropRow" hidden>Crop position <input id="crop" type="range" min="0" max="100" value="50" /></label>
-      <label class="row">Overlay size <select id="ovSize"><option value="25">25%</option><option value="35" selected>35%</option><option value="50">50%</option><option value="75">75%</option><option value="100">Fill the frame</option></select></label>
-      <label class="row">Overlay corner <select id="ovPos"><option value="br" selected>Bottom right</option><option value="bl">Bottom left</option><option value="tr">Top right</option><option value="tl">Top left</option><option value="c">Centre</option></select></label>
+      <label class="row">New overlay size <select id="ovSize"><option value="25">25%</option><option value="35" selected>35%</option><option value="50">50%</option><option value="75">75%</option><option value="100">Fill the frame</option></select></label>
+      <label class="row">New overlay corner <select id="ovPos"><option value="br" selected>Bottom right</option><option value="bl">Bottom left</option><option value="tr">Top right</option><option value="tl">Top left</option><option value="c">Centre</option></select></label>
       <label class="row check"><input id="caps" type="checkbox" /> Captions from my script</label>
       <button id="srt" class="btn sm" disabled>Download captions (.srt)</button>
       <label class="row">Intro title <input id="introText" type="text" placeholder="e.g. How to get started" /></label>

@@ -243,4 +243,21 @@ body.app .stage>*:not(.video-wrap){flex:none}
 .ostrip:empty::before{content:"Overlay track: add a video on top with + Overlay video";position:absolute;left:10px;top:50%;transform:translateY(-50%);font:500 11px Inter;color:#9a9a9a;pointer-events:none}
 .blk.ovl{background:#f4b6d6;color:#5a1f43}
 .timeline.disabled .ostrip{pointer-events:none}
-.video-wrap #ovideo{position:absolute;inset:auto;object-fit:contain;border-radius:4px;box-shadow:0 2px 12px #0006;background:#000;z-index:2}
+#ovbox{position:absolute;z-index:3;cursor:move;touch-action:none;box-shadow:0 2px 12px #0006;outline:1.5px solid #ffffffcc}
+#ovbox[hidden]{display:none}
+#ovbox .ovclip{position:absolute;inset:0;overflow:hidden;background:#000}
+.video-wrap #ovbox video{position:absolute;inset:auto;object-fit:fill;pointer-events:none;max-width:none}
+.ovh{position:absolute;background:#fff;border:1.5px solid #2f7cf6;border-radius:3px;box-sizing:border-box;display:none}
+.ovh.c{width:13px;height:13px}
+.ovh.c[data-h=tl]{left:-7px;top:-7px;cursor:nwse-resize}.ovh.c[data-h=br]{right:-7px;bottom:-7px;cursor:nwse-resize}
+.ovh.c[data-h=tr]{right:-7px;top:-7px;cursor:nesw-resize}.ovh.c[data-h=bl]{left:-7px;bottom:-7px;cursor:nesw-resize}
+.ovh.e.h{left:25%;right:25%;height:9px}.ovh.e.v{top:25%;bottom:25%;width:9px}
+.ovh.e[data-h=t]{top:-5px;cursor:ns-resize}.ovh.e[data-h=b]{bottom:-5px;cursor:ns-resize}
+.ovh.e[data-h=l]{left:-5px;cursor:ew-resize}.ovh.e[data-h=r]{right:-5px;cursor:ew-resize}
+#ovbox:hover .ovh.c,#ovbox:not(.crop) .ovh.c{display:block}
+#ovbox.crop .ovh.c{display:none}
+#ovbox.crop .ovh.e{display:block;background:#ffb88e}
+.ovtools{position:absolute;left:0;top:-26px;display:none;gap:4px}
+#ovbox:hover .ovtools{display:flex}
+.ovtools button{font:600 11px Inter;padding:3px 8px;border:0;border-radius:6px;background:#171717;color:#fff;cursor:pointer}
+.ovtools button:hover{background:#333}

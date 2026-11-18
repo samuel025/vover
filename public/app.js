@@ -75,7 +75,7 @@ function updateUI() {
   $('undo').disabled = !idle || !history.length; $('redo').disabled = !idle || !future.length;
   const gone = v && !!total() && editedLen() < 0.05; // every clip was deleted
   for (const k of ['split', 'clipSpeed', 'delClip']) $(k).disabled = !idle || gone;
-  const onOv = voiceFree && !editVoice && selTrack === 'overlay'; $('split').textContent = editVoice ? 'Split voice' : onOv ? 'Split overlay' : 'Split'; $('delClip').textContent = editVoice ? 'Delete voice' : onOv ? 'Delete overlay' : 'Delete clip'; $('clipSpeed').disabled ||= editVoice;
+  const onOv = voiceFree && selTrack === 'overlay'; $('split').textContent = onOv ? 'Split overlay' : editVoice ? 'Split voice' : 'Split'; $('delClip').textContent = onOv ? 'Delete overlay' : editVoice ? 'Delete voice' : 'Delete clip'; $('clipSpeed').disabled ||= editVoice;
   wrap.classList.toggle('gone', gone);
   if (gone) for (const k of ['cut', 'rec', 'play', 'toStart', 'back', 'fwd']) $(k).disabled = true;
   $('pauses').disabled = !idle || !hasTake() || voiceFree;
@@ -167,7 +167,7 @@ function probe(file) {
   return new Promise((res, rej) => {
     const v = document.createElement('video'), url = URL.createObjectURL(file);
     v.preload = 'metadata';
-    v.onloadedmetadata = () => res({ dur: v.duration, url });
+    v.onloadedmetadata = () => res({ dur: v.duration, url, vw: v.videoWidth, vh: v.videoHeight });
     v.onerror = () => rej(new Error('unplayable'));
     v.src = url;
   });
@@ -772,8 +772,8 @@ function cutPress() {
   const e0 = toEdit(cutStart), e1 = toEdit(t), lo = Math.min(e0, e1), hi = Math.max(e0, e1);
   if (hi - lo < 0.1) return status('Move the playhead away from the start point first.');
   cutStart = null;
-  if (editVoice) { renderCuts(); return voiceCut(lo, hi); }
   if (voiceFree && selTrack === 'overlay') { renderCuts(); return cutOverlay(lo, hi); }
+  if (editVoice) { renderCuts(); return voiceCut(lo, hi); }
   checkpoint();
   if (voiceFree) cutFree(lo, hi); else for (const [a, b] of spansForEdited(lo, hi)) removeSpan(a, b);
   commitEdit();
@@ -785,8 +785,8 @@ $('cut').onclick = cutPress;
 
 function splitHere() {
   if (!canSeek()) return;
-  if (editVoice) return voiceSplit(toEdit(gNow()));
   if (voiceFree && selTrack === 'overlay') return splitOverlay(toEdit(gNow()));
+  if (editVoice) return voiceSplit(toEdit(gNow()));
   const g = gNow(), k = clipIndexAt(g), c = clips[k];
   if (!c || g - c.a < 0.15 || c.b - g < 0.15) return status('Move the playhead into the middle of a clip to split it.');
   checkpoint(); clips.splice(k, 1, { ...c, b: g }, { ...c, a: g }); commitEdit();
@@ -794,7 +794,7 @@ function splitHere() {
 }
 function deleteClip() {
   if (!canSeek()) return;
-  if (voiceFree && !editVoice && selTrack === 'overlay') return deleteOverlay();
+  if (voiceFree && selTrack === 'overlay') return deleteOverlay();
   if (editVoice || (voiceFree && selTrack === 'voice')) return voiceDelete(); // the voice piece was the last thing clicked
   const k = curIdx();
   if (k < 0) return;
@@ -964,7 +964,7 @@ async function addOverlay(file) {
   if (!voiceFree) { $('editMode').value = 'video'; $('editMode').dispatchEvent(new Event('change')); switched = voiceFree; } // overlays need the voice on its own track
   if (!voiceFree) return status('Overlays need "Edits change" set to "video and voice separate".');
   try {
-    const { dur, url } = await probe(file), s = { id: crypto.randomUUID(), name: file.name, file, url, dur };
+    const { dur, url, vw, vh } = await probe(file), s = { id: crypto.randomUUID(), name: file.name, file, url, dur, vw, vh };
     checkpoint();
     osources.push(s);
     olayout([...asItems(), { o: osources.length - 1, a: 0, b: dur, r: 1, at: toEdit(gNow()) }]);
@@ -1054,30 +1054,94 @@ function overlayFrame() { // the part of the player the picture fills, in pixels
   const W = wrap.clientWidth, H = wrap.clientHeight, r = pictureRect();
   return $('shape').value === 'original' && r ? { x: r.ox, y: r.oy, w: r.pw, h: r.ph } : { x: 0, y: 0, w: W, h: H };
 }
-function placeOverlay() {
-  const F = overlayFrame(), size = +$('ovSize').value / 100, vw = ov.videoWidth || 16, vh = ov.videoHeight || 9;
-  let w = F.w * size, h = (w * vh) / vw, x, y;
-  if (size >= 0.99) { const k = Math.min(F.w / vw, F.h / vh); w = vw * k; h = vh * k; x = F.x + (F.w - w) / 2; y = F.y + (F.h - h) / 2; }
-  else {
-    const m = F.w * 0.03, pos = $('ovPos').value;
-    x = pos.includes('l') ? F.x + m : pos === 'c' ? F.x + (F.w - w) / 2 : F.x + F.w - w - m;
-    y = pos.includes('t') ? F.y + m : pos === 'c' ? F.y + (F.h - h) / 2 : F.y + F.h - h - m;
+// Where an overlay clip sits: x, y and w are fractions of the picture (w is its width), cl/ct/cr/cb are how much is cropped off each side.
+// New clips start from the size and corner chosen in Picture & text.
+function ovBoxOf(c) {
+  if (c.w == null) {
+    const F = overlayFrame(), fa = F.w && F.h ? F.w / F.h : 16 / 9, src = osources[c.o], aspect = (src?.vw || 16) / (src?.vh || 9);
+    const size = +$('ovSize').value / 100, pos = $('ovPos').value, m = 0.03;
+    let w = size, h = (w / aspect) * fa, x, y; // h is a fraction of the picture's height
+    if (size >= 0.99) { const k = Math.min(1 / w, 1 / h); w *= k; h *= k; x = (1 - w) / 2; y = (1 - h) / 2; }
+    else {
+      x = pos.includes('l') ? m : pos === 'c' ? (1 - w) / 2 : 1 - w - m;
+      y = pos.includes('t') ? m * fa : pos === 'c' ? (1 - h) / 2 : 1 - h - m * fa;
+    }
+    Object.assign(c, { x, y, w, cl: 0, ct: 0, cr: 0, cb: 0 });
   }
-  Object.assign(ov.style, { width: w + 'px', height: h + 'px', left: x + 'px', top: y + 'px' });
+  return c;
+}
+const activeOv = () => { const e = toEdit(gNow()); return voiceFree ? ovl.find((x) => e >= x.at && e < x.at + olen(x)) : null; };
+let ovCrop = false;
+function placeOverlay(c) {
+  const F = overlayFrame(), b = ovBoxOf(c), vw = ov.videoWidth || osources[c.o]?.vw || 16, vh = ov.videoHeight || osources[c.o]?.vh || 9;
+  const w = b.w * F.w, h = (w * (vh * (1 - b.ct - b.cb))) / (vw * (1 - b.cl - b.cr));
+  Object.assign($('ovbox').style, { left: F.x + b.x * F.w + 'px', top: F.y + b.y * F.h + 'px', width: w + 'px', height: h + 'px' });
+  const full = w / (1 - b.cl - b.cr), fullH = (full * vh) / vw; // the whole picture, of which the box shows a part
+  Object.assign(ov.style, { width: full + 'px', height: fullH + 'px', left: -b.cl * full + 'px', top: -b.ct * fullH + 'px' });
+  $('ovbox').classList.toggle('crop', ovCrop);
 }
 function syncOverlay() {
-  const e = toEdit(gNow()), c = voiceFree && ovl.length ? ovl.find((x) => e >= x.at && e < x.at + olen(x)) : null;
-  if (!c) { if (!ov.hidden) { ov.pause(); ov.hidden = true; } return; }
+  const e = toEdit(gNow()), c = activeOv(), box = $('ovbox');
+  if (!c) { if (!box.hidden) { ov.pause(); box.hidden = true; } return; }
   const src = osources[c.o]?.url;
   if (!src) return;
   if (ov.dataset.o !== String(c.o)) { ov.dataset.o = String(c.o); ov.src = src; }
-  ov.hidden = false; placeOverlay();
+  box.hidden = false; placeOverlay(c);
   const playing = state.playing || (state.recording && !state.recPaused), want = c.a + (e - c.at) * c.r;
   if (Math.abs(ov.currentTime - want) > (playing ? 0.3 : 0.03)) ov.currentTime = want;
   ov.playbackRate = Math.min(16, (+$('rate').value || 1) * c.r);
   if (playing && ov.paused) ov.play().catch(() => {}); else if (!playing && !ov.paused) ov.pause();
 }
-for (const id of ['ovSize', 'ovPos']) $(id).addEventListener('change', () => { if (!ov.hidden) placeOverlay(); touched(); });
+// grab the overlay in the player: drag it to move, drag a corner to resize, switch on Crop and drag an edge to crop
+let obox = null;
+$('ovbox').onpointerdown = (e) => {
+  const c = activeOv();
+  if (!c || !canSeek()) return;
+  e.stopPropagation(); e.preventDefault();
+  const tool = e.target.closest('[data-t]')?.dataset.t;
+  if (tool) return ovTool(tool, c);
+  const F = overlayFrame(), b = { ...ovBoxOf(c) }, handle = e.target.closest('[data-h]')?.dataset.h || 'move';
+  obox = { c, handle, x0: e.clientX, y0: e.clientY, b, F, moved: false };
+  $('ovbox').setPointerCapture(e.pointerId);
+  selTrack = 'overlay'; osel = { o: c.o, a: c.a }; updateUI(); renderCuts();
+};
+$('ovbox').onpointermove = (e) => {
+  const d = obox;
+  if (!d) return;
+  const dx = e.clientX - d.x0, dy = e.clientY - d.y0;
+  if (!d.moved && Math.hypot(dx, dy) < 3) return;
+  if (!d.moved) { checkpoint(); d.moved = true; }
+  const { c, b, F, handle } = d, src = osources[c.o], vw = src?.vw || 16, vh = src?.vh || 9;
+  const cw = vw * (1 - b.cl - b.cr), ch = vh * (1 - b.ct - b.cb), boxH = (b.w * F.w * ch) / cw / F.h; // box height as a fraction of the picture
+  if (handle === 'move') { c.x = Math.max(-b.w + 0.1, Math.min(0.9, b.x + dx / F.w)); c.y = Math.max(-boxH + 0.1, Math.min(0.9, b.y + dy / F.h)); }
+  else if (handle.length === 2) { // a corner: scale around the opposite corner
+    const k = Math.max(0.05 / b.w, 1 + ((handle.includes('r') ? dx : -dx) / (b.w * F.w)));
+    c.w = Math.min(2, b.w * k);
+    if (handle.includes('l')) c.x = b.x + b.w - c.w;
+    if (handle.includes('t')) c.y = b.y + boxH - boxH * (c.w / b.w);
+  } else { // an edge, in crop mode: the picture keeps its size and more or less of it shows
+    const S = (b.w * F.w) / (1 - b.cl - b.cr), Sh = (S * vh) / vw;
+    if (handle === 'l') { c.cl = Math.max(0, Math.min(1 - b.cr - 0.05, b.cl + dx / S)); c.x = b.x + ((c.cl - b.cl) * S) / F.w; }
+    if (handle === 'r') c.cr = Math.max(0, Math.min(1 - b.cl - 0.05, b.cr - dx / S));
+    if (handle === 't') { c.ct = Math.max(0, Math.min(1 - b.cb - 0.05, b.ct + dy / Sh)); c.y = b.y + ((c.ct - b.ct) * Sh) / F.h; }
+    if (handle === 'b') c.cb = Math.max(0, Math.min(1 - b.ct - 0.05, b.cb - dy / Sh));
+    c.w = (S * (1 - c.cl - c.cr)) / F.w;
+  }
+  placeOverlay(c); touched();
+};
+$('ovbox').onpointerup = $('ovbox').onpointercancel = () => { const d = obox; obox = null; if (d?.moved) commitEdit(); };
+function ovTool(t, c) {
+  if (t === 'crop') { ovCrop = !ovCrop; placeOverlay(c); return status(ovCrop ? 'Crop on: drag an edge of the overlay to crop it. Press Crop again to go back to resizing.' : 'Resize: drag a corner to make the overlay bigger or smaller.'); }
+  checkpoint();
+  if (t === 'reset') { c.w = null; ovBoxOf(c); status('Overlay back to its starting size and corner.'); }
+  if (t === 'fill') { // as large as fits in the picture, whatever is left after cropping
+    const F = overlayFrame(), src = osources[c.o], cw = (src?.vw || 16) * (1 - c.cl - c.cr), ch = (src?.vh || 9) * (1 - c.ct - c.cb), k = Math.min(F.w / cw, F.h / ch);
+    c.w = (cw * k) / F.w; c.x = (1 - c.w) / 2; c.y = (1 - (ch * k) / F.h) / 2; status('Overlay fills the picture.');
+  }
+  placeOverlay(c); commitEdit();
+}
+// the size and corner in Picture & text are what new overlays start with; changing them resets the overlay under the playhead too
+for (const id of ['ovSize', 'ovPos']) $(id).addEventListener('change', () => { const c = activeOv(); if (c) { checkpoint(); c.w = null; ovBoxOf(c); commitEdit(); } });
 
 // dragging a clip: shows where it would land
 function moveHint(e) {
@@ -2087,7 +2151,7 @@ $('export').onclick = async () => {
       try {
         status('Exporting on this device…');
         const fx = { shape, crop: $('crop').value / 100, captions, intro, outro, zooms };
-        const r = await exportLocally({ sources: sources.map((x) => ({ file: x.file, off: x.off, blank: !!x.blank })), voice: finalAudio(true), overlay: ovl.length ? { clips: ovl.map((c) => ({ file: osources[c.o].file, a: c.a, b: c.b, at: c.at })), size: +$('ovSize').value / 100, pos: $('ovPos').value } : null, segs: segs().map((g) => ({ src: g.src, a: g.a - sources[g.src].off, b: g.b - sources[g.src].off, r: g.r })), fx, saveHandle: handle, onProgress: (p) => (btn.textContent = `Exporting ${Math.round(p * 100)}%`) });
+        const r = await exportLocally({ sources: sources.map((x) => ({ file: x.file, off: x.off, blank: !!x.blank })), voice: finalAudio(true), overlay: ovl.length ? { clips: ovl.map((c) => ({ file: osources[c.o].file, a: c.a, b: c.b, at: c.at, box: { ...ovBoxOf(c) } })) } : null, segs: segs().map((g) => ({ src: g.src, a: g.a - sources[g.src].off, b: g.b - sources[g.src].off, r: g.r })), fx, saveHandle: handle, onProgress: (p) => (btn.textContent = `Exporting ${Math.round(p * 100)}%`) });
         blob = r.blob; local = true;
         if (r.audioCodec !== 'aac') note = ' This browser cannot make AAC audio, so the voice is Opus. Most players handle it, but QuickTime and some older devices may not.';
       } catch (e) {
@@ -2148,7 +2212,7 @@ updateUI();
     for (const m of meta) { if (m.blank) { sources.push({ id: m.id, name: m.name, blank: true, dur: m.dur, off: total() }); continue; } const rec = m.file ? { file: m.file } : await kv.get('src-' + m.id); if (rec?.file) await addSource(rec.file, m.id); }
   } catch { return status('This browser cannot play the saved video any more. Upload it again.'); }
   if (!sources.length) return;
-  try { for (const m of (await kv.get('osources')) || []) { const rec = await kv.get('osrc-' + m.id); if (rec?.file) { const { dur, url } = await probe(rec.file); osources.push({ id: m.id, name: m.name, file: rec.file, url, dur }); } } } catch {}
+  try { for (const m of (await kv.get('osources')) || []) { const rec = await kv.get('osrc-' + m.id); if (rec?.file) { const { dur, url, vw, vh } = await probe(rec.file); osources.push({ id: m.id, name: m.name, file: rec.file, url, dur, vw, vh }); } } } catch {}
   if (legacy) { kv.set('src-' + sources[0].id, { file: sources[0].file }); saveSources(); kv.del('video'); }
   clips = sources.filter((x) => !x.blank).map((x) => ({ a: x.off, b: x.off + x.dur, r: 1 }));
   let usedSaved = false;
