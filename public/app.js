@@ -19,7 +19,8 @@ let cleaned = null, cleaning = null, finalCache = {}, abCache = null, lastClipKe
 const B = 1024; // samples per waveform bucket
 let peaks = [], curMax = 0, curCnt = 0, live = null;
 
-const fmt = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`;
+let fmtDigits = 1; // times show hundredths of a second when the timeline is zoomed in
+const fmt = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(fmtDigits).padStart(fmtDigits + 3, '0')}`;
 const status = (s) => ($('status').textContent = s);
 const hasTake = () => !!state.take && state.take.samples.length > 0;
 const canSeek = () => !!state.file && (!state.recording || state.recPaused);
@@ -330,18 +331,19 @@ function dropGaps() {
 // there is always empty room after the last thing, so clips can be dragged on without limit. The export stops at the last thing on any track.
 // view.len is how many seconds are visible (0 means "fit": all of what is there) and view.s is where the visible part starts.
 let view = { s: 0, len: 0 }, reach = 0;
+const MIN_VIEW = 0.1; // the closest zoom shows a tenth of a second across the whole timeline, a few pixels per video frame
 // with the voice on its own track the timeline is as long as the longer of the video and the voice, so no voice is ever hidden
 const extent = () => (voiceFree && hasTake() ? Math.max(editedLen(), voiceSec()) : editedLen());
 const runway = (C) => Math.max(10, C * 0.25);
 function vr() {
-  const C = extent() || 1, L = Math.max(C + runway(C), reach), len = view.len ? Math.max(0.5, Math.min(L, view.len)) : C;
+  const C = extent() || 1, L = Math.max(C + runway(C), reach), len = view.len ? Math.max(MIN_VIEW, Math.min(L, view.len)) : C;
   return { L, C, len, s: view.len ? Math.max(0, Math.min(L - len, view.s)) : 0 };
 }
 const pctE = (e) => { const v = vr(); return ((e - v.s) / v.len) * 100; };
 const eAtX = (clientX, el = timeline) => { const r = el.getBoundingClientRect(), v = vr(); return v.s + Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * v.len; };
-function setView(s, len) { view = { s, len }; renderCuts(); updateScroll(); }
+function setView(s, len) { view = { s, len }; fmtDigits = len && len < 20 ? 2 : 1; renderCuts(); updateScroll(); }
 function zoomBy(factor, anchor) {
-  const v = vr(), len = Math.min(v.C, Math.max(0.5, v.len / factor));
+  const v = vr(), len = Math.min(v.C, Math.max(MIN_VIEW, v.len / factor));
   const a = anchor ?? (toEdit(gNow()) >= v.s && toEdit(gNow()) <= v.s + v.len ? toEdit(gNow()) : v.s + v.len / 2); // keep the playhead (or the middle) where it is
   const rel = (a - v.s) / v.len;
   setView(Math.max(0, a - rel * len), len >= v.C - 1e-6 ? 0 : len);
@@ -349,9 +351,16 @@ function zoomBy(factor, anchor) {
 function updateScroll() {
   const v = vr(), bar = $('tscroll'), fit = !view.len || (Math.abs(v.len - v.C) < 1e-6 && v.s < 1e-6);
   bar.hidden = !total();
+  const sl = $('tzSlider'), fmax = Math.max(2, v.C / MIN_VIEW);
+  if (sl !== document.activeElement) sl.value = String(Math.round((Math.log(Math.max(1, v.C / v.len)) / Math.log(fmax)) * 1000));
   $('tzLevel').textContent = fit ? 'Fit' : (v.C / v.len).toFixed(v.C / v.len < 10 ? 1 : 0) + '×';
   if (total()) { const t = bar.firstElementChild; t.style.left = (v.s / v.L) * 100 + '%'; t.style.width = (v.len / v.L) * 100 + '%'; }
 }
+$('tzSlider').oninput = () => { // a slider from the whole timeline to a tenth of a second, around the playhead
+  const v = vr(), fmax = Math.max(2, v.C / MIN_VIEW), f = Math.exp((+$('tzSlider').value / 1000) * Math.log(fmax)), len = v.C / f, e = toEdit(gNow());
+  const a = e >= v.s && e <= v.s + v.len ? e : v.s + v.len / 2, rel = (a - v.s) / v.len;
+  setView(Math.max(0, a - rel * len), f < 1.02 ? 0 : len);
+};
 $('tzIn').onclick = () => zoomBy(1.6);
 $('tzOut').onclick = () => zoomBy(1 / 1.6);
 $('tzFit').onclick = () => setView(0, 0);
@@ -857,12 +866,20 @@ function setRazor(on) {
 }
 const toggleRazor = () => setRazor(!razor);
 $('cut').onclick = toggleRazor;
+// where a click at time t really lands: close to the playhead or to the edge of anything, it lines up exactly
+function snapT(t) {
+  const tol = 7 * (vr().len / timeline.clientWidth), e = toEdit(gNow());
+  const marks = [e, 0, ...segs().flatMap((g) => [g.e0, g.e0 + (g.b - g.a) / g.r]), ...ovl.flatMap((c) => [c.at, c.at + olen(c)]), ...pieces().flatMap((q) => [q.s, q.e])];
+  let best = t, gap = tol;
+  for (const q of marks) if (Math.abs(q - t) < gap) { gap = Math.abs(q - t); best = q; }
+  return best;
+}
 const razorLine = (e) => { // a guide that follows the mouse along the row it would cut
   const r = $('tbody').getBoundingClientRect(), y = e.clientY - r.top, line = $('rline');
   let track = y < 30 ? 'overlay' : y < 60 ? 'video' : 'voice';
   if (track === 'voice' && !voiceFree) track = 'video';
   const top = track === 'overlay' ? 0 : track === 'video' ? 30 : 60, h = track === 'voice' ? r.height - 60 - 14 : 30;
-  Object.assign(line.style, { left: e.clientX - r.left + 'px', top: top + 'px', height: h + 'px' });
+  Object.assign(line.style, { left: (pctE(snapT(eAtX(e.clientX))) / 100) * r.width + 'px', top: top + 'px', height: h + 'px' });
   line.hidden = false;
 };
 timeline.addEventListener('pointermove', (e) => { if (razor) razorLine(e); });
@@ -873,7 +890,7 @@ timeline.addEventListener('pointerdown', (e) => {
   if (!canSeek()) return;
   let track = trackAtY(e.clientY);
   if (track === 'voice' && !voiceFree) track = 'video';
-  const t = eAtX(e.clientX);
+  const t = snapT(eAtX(e.clientX));
   if (track === 'overlay') splitOverlay(t); else if (track === 'voice') voiceSplit(t); else splitVideoAt(t);
 }, true);
 function deleteClip() {
@@ -1520,7 +1537,7 @@ $('srt').onclick = () => {
   status('Captions downloaded. Their timing follows your section start times, so use "Fit to my voice" for the best match.');
 };
 
-const RULER_STEPS = [0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
+const RULER_STEPS = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
 function tlabel(t, step) { const m = Math.floor(t / 60), sec = t - m * 60; return `${m}:${sec.toFixed(step < 0.1 ? 2 : step < 1 ? 1 : 0).padStart(step < 0.1 ? 5 : step < 1 ? 4 : 2, '0')}`; }
 function drawWave() {
   if (syncTail()) return renderCuts();
@@ -2353,6 +2370,9 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === ']') { if (sections[cur + 1]) seekTo(sections[cur + 1].start); }
   else if (e.key === 'ArrowUp') { e.preventDefault(); setSpeed(speed + 0.1); }
   else if (e.key === 'ArrowDown') { e.preventDefault(); setSpeed(speed - 0.1); }
+  else if (e.key === ',' || e.key === '<') seekBy(-1 / 30); // one video frame back
+  else if (e.key === '.' || e.key === '>') seekBy(1 / 30);
+  else if (k === 'z') { const v = vr(); if (view.len && v.len < 3) setView(0, 0); else { const e0 = toEdit(gNow()); setView(Math.max(0, e0 - 1), 2); } } // close in on the playhead, or back out
   else if (e.key === 'ArrowLeft') seekBy(-(e.shiftKey ? 1 : 5));
   else if (e.key === 'ArrowRight') seekBy(e.shiftKey ? 1 : 5);
 });

@@ -14,6 +14,7 @@ Record a voiceover over any video in one browser tab. Upload a video, paste your
 - New project clears everything and gives a blank workspace
 - Zoomable timeline with a time ruler: + / - buttons or keys, Ctrl + scroll, double-click a clip to zoom to it, scroll bar to move along, follows the playhead while playing
 - Separate tracks (the default): the timeline has Overlay, Video and Voice tracks. Click a clip, a track name or the empty part of a track, and Split, Cut, Delete and Speed act on that track. Deleting, cutting or trimming leaves empty space; tick "Link voice to video" for the old closes-the-gap behaviour
+- Precise zoom: a zoom slider (down to a tenth of a second across the timeline), Ctrl+scroll, + / - and Z; times show hundredths when zoomed, "," and "." step one frame, and the Cut tool snaps to the playhead and to the edges of clips
 - Voice trimming: drag the edge of a voice piece to shorten it, or pull it back out to bring back the recording behind it (cutting, deleting and moving never erase the recording itself)
 - Scrolling timeline: scroll sideways with the wheel or the bar, and drag clips or voice pieces on without limit (holding one at the edge scrolls along); the exported video ends at the last thing on any track
 - Cut tool: press Cut (or X), then click the Video, Voice or Overlay row wherever you want a cut, as many times as you like; Esc turns it off

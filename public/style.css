@@ -312,3 +312,5 @@ body.app .stage>*:not(.stagebox){flex:none}
 .ablk::before,.ablk::after{content:"";position:absolute;top:0;bottom:0;width:7px;background:#c8601f55;opacity:0;transition:.1s;cursor:col-resize}
 .ablk::before{left:0;border-radius:5px 0 0 5px}.ablk::after{right:0;border-radius:0 5px 5px 0}
 .ablk:hover::before,.ablk:hover::after{opacity:1}
+
+#tzSlider{width:120px;vertical-align:middle;margin:0 6px;accent-color:var(--text)}
