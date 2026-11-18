@@ -14,6 +14,7 @@ Record a voiceover over any video in one browser tab. Upload a video, paste your
 - New project clears everything and gives a blank workspace
 - Zoomable timeline with a time ruler: + / - buttons or keys, Ctrl + scroll, double-click a clip to zoom to it, scroll bar to move along, follows the playhead while playing
 - Separate tracks (the default): the timeline has Overlay, Video and Voice tracks. Click a clip, a track name or the empty part of a track, and Split, Cut, Delete and Speed act on that track. Deleting, cutting or trimming leaves empty space; tick "Link voice to video" for the old closes-the-gap behaviour
+- Scrolling timeline: scroll sideways with the wheel or the bar, and drag clips or voice pieces on without limit (holding one at the edge scrolls along); the exported video ends at the last thing on any track
 - Cut tool: press Cut (or X), then click the Video, Voice or Overlay row wherever you want a cut, as many times as you like; Esc turns it off
 - Edit tab and right-click menus: clicking a clip shows its settings (overlay size, position and crop; clip speed; voice take actions) and right-clicking a clip gives Split, Delete and more; File menu holds New, Open and Save workspace
 - Aspect ratio: choose the project shape (16:9, 9:16, 1:1, 4:5, 4:3, 3:4, 21:9 or your own ratio); the picture fills it (crop position adjustable) or sits inside it with black bars, in the player and in the export

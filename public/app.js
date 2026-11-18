@@ -297,7 +297,7 @@ function layout(items) {
     if (at - end > 0.02) out.push({ a: 0, b: at - end, r: 1, gap: true });
     out.push(it.c); end = at + (it.c.b - it.c.a) / it.c.r;
   }
-  if (oEnd() - end > 0.02) out.push({ a: 0, b: oEnd() - end, r: 1, gap: true }); // an overlay running past the main video: empty space to hold it
+  if (padEnd() - end > 0.02) out.push({ a: 0, b: padEnd() - end, r: 1, gap: true }); // an overlay or voice running past the main video: empty space to hold it
   const dur = out.reduce((n, c) => n + (c.gap ? c.b : 0), 0);
   sources = dur > 0 ? [...real, { id: 'gap', name: 'Gap', blank: true, dur, off: base }] : real;
   let o = base;
@@ -305,6 +305,17 @@ function layout(items) {
   clips = out;
   touched(); saveSources();
   if (loaded >= 0 && sources[loaded] !== was) { loaded = -1; if (clips.length) gSeek(snapG(toSrc(keepE))); }
+}
+// where the last thing on the overlay or voice track ends
+const voiceEnd = () => (voiceFree && hasTake() && !state.recording ? (pieces().at(-1)?.e ?? 0) : 0);
+const padEnd = () => Math.max(oEnd(), voiceEnd());
+// keeps the main track as long as the last thing on any track, so playback and export stop exactly there
+function syncTail() {
+  if (!voiceFree || !sources.length || state.recording) return false;
+  const real = segs().filter((g) => !sources[g.src].blank), last = real[real.length - 1], end = last ? last.e0 + (last.b - last.a) / last.r : 0;
+  if (Math.abs(editedLen() - Math.max(end, padEnd())) <= 0.05) return false;
+  layout(realItems());
+  return true;
 }
 // removes gap clips and the gap source (the voice is tied to the video again, so there is nothing to leave space for)
 function dropGaps() {
@@ -314,30 +325,32 @@ function dropGaps() {
   touched(); saveSources();
 }
 
-// ---------- timeline zoom ----------
-// The timeline can show just part of the edited video, so cuts and trims can be placed precisely.
-// view.len is how many seconds are visible (0 means all of it) and view.s is where the visible part starts.
-let view = { s: 0, len: 0 };
+// ---------- timeline zoom and scroll ----------
+// The timeline can show just part of the edited video, so cuts and trims can be placed precisely, and it can be scrolled to the side:
+// there is always empty room after the last thing, so clips can be dragged on without limit. The export stops at the last thing on any track.
+// view.len is how many seconds are visible (0 means "fit": all of what is there) and view.s is where the visible part starts.
+let view = { s: 0, len: 0 }, reach = 0;
 // with the voice on its own track the timeline is as long as the longer of the video and the voice, so no voice is ever hidden
 const extent = () => (voiceFree && hasTake() ? Math.max(editedLen(), voiceSec()) : editedLen());
+const runway = (C) => Math.max(10, C * 0.25);
 function vr() {
-  const L = extent() || 1, len = view.len && view.len < L - 1e-6 ? Math.max(0.5, Math.min(L, view.len)) : L;
-  return { L, len, s: Math.max(0, Math.min(L - len, view.s)) };
+  const C = extent() || 1, L = Math.max(C + runway(C), reach), len = view.len ? Math.max(0.5, Math.min(L, view.len)) : C;
+  return { L, C, len, s: view.len ? Math.max(0, Math.min(L - len, view.s)) : 0 };
 }
 const pctE = (e) => { const v = vr(); return ((e - v.s) / v.len) * 100; };
 const eAtX = (clientX, el = timeline) => { const r = el.getBoundingClientRect(), v = vr(); return v.s + Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * v.len; };
 function setView(s, len) { view = { s, len }; renderCuts(); updateScroll(); }
 function zoomBy(factor, anchor) {
-  const v = vr(), len = Math.min(v.L, Math.max(0.5, v.len / factor));
+  const v = vr(), len = Math.min(v.C, Math.max(0.5, v.len / factor));
   const a = anchor ?? (toEdit(gNow()) >= v.s && toEdit(gNow()) <= v.s + v.len ? toEdit(gNow()) : v.s + v.len / 2); // keep the playhead (or the middle) where it is
   const rel = (a - v.s) / v.len;
-  setView(Math.max(0, a - rel * len), len >= v.L - 1e-6 ? 0 : len);
+  setView(Math.max(0, a - rel * len), len >= v.C - 1e-6 ? 0 : len);
 }
 function updateScroll() {
-  const v = vr(), bar = $('tscroll'), zoomed = v.len < v.L - 1e-6;
-  bar.hidden = !zoomed;
-  $('tzLevel').textContent = zoomed ? (v.L / v.len).toFixed(v.L / v.len < 10 ? 1 : 0) + '×' : 'Fit';
-  if (zoomed) { const t = bar.firstElementChild; t.style.left = (v.s / v.L) * 100 + '%'; t.style.width = (v.len / v.L) * 100 + '%'; }
+  const v = vr(), bar = $('tscroll'), fit = !view.len || (Math.abs(v.len - v.C) < 1e-6 && v.s < 1e-6);
+  bar.hidden = !total();
+  $('tzLevel').textContent = fit ? 'Fit' : (v.C / v.len).toFixed(v.C / v.len < 10 ? 1 : 0) + '×';
+  if (total()) { const t = bar.firstElementChild; t.style.left = (v.s / v.L) * 100 + '%'; t.style.width = (v.len / v.L) * 100 + '%'; }
 }
 $('tzIn').onclick = () => zoomBy(1.6);
 $('tzOut').onclick = () => zoomBy(1 / 1.6);
@@ -346,8 +359,24 @@ timeline.addEventListener('wheel', (e) => {
   if (!total()) return;
   const v = vr();
   if (e.ctrlKey || e.metaKey) { e.preventDefault(); zoomBy(e.deltaY < 0 ? 1.25 : 0.8, eAtX(e.clientX)); }
-  else if (v.len < v.L - 1e-6) { e.preventDefault(); setView(v.s + ((e.deltaX || e.deltaY) / timeline.clientWidth) * v.len, v.len); } // scroll along the zoomed timeline
+  else { e.preventDefault(); setView(v.s + ((e.deltaX || e.deltaY) / timeline.clientWidth) * v.len, v.len); } // scroll along the zoomed timeline
 }, { passive: false });
+// While a clip or voice piece is being dragged, holding it near either side scrolls along; to the right there is no end.
+let edge = null;
+function edgeStart(onMove) {
+  const v = vr();
+  if (!view.len) view = { s: v.s, len: v.len }; // pin the window so it scrolls instead of rescaling
+  edge = { x: 0, onMove, timer: setInterval(() => {
+    const r = timeline.getBoundingClientRect(), w = vr(), zone = 56;
+    const dir = edge.x > r.right - zone ? Math.min(1, (edge.x - (r.right - zone)) / zone) : edge.x < r.left + zone ? -Math.min(1, (r.left + zone - edge.x) / zone) : 0;
+    if (!dir || (dir < 0 && w.s <= 0)) return;
+    reach = Math.max(reach, w.s + w.len * 1.1);
+    setView(Math.max(0, w.s + dir * w.len * 0.025), w.len);
+    edge.onMove({ clientX: edge.x });
+  }, 30) };
+}
+const edgeTrack = (e) => { if (edge) edge.x = e.clientX; };
+function edgeStop() { if (edge) { clearInterval(edge.timer); edge = null; } reach = 0; }
 // the bar under the timeline shows which part is visible; drag it to scroll, click it to jump
 let barDrag = null;
 $('tscroll').onpointerdown = (e) => {
@@ -547,7 +576,7 @@ function removeSpan(a, b) {
 const vt = (g) => (voiceFree ? toEdit(g) : g);
 const vInv = (t) => (voiceFree ? toSrc(t) : t);
 const voiceSec = () => (hasTake() ? state.take.samples.length / state.take.rate : 0);
-const overrunNote = () => (voiceFree && voiceSec() - editedLen() > 0.5 ? ` ${(voiceSec() - editedLen()).toFixed(1)}s of your voice now runs past the end of the video and will not be in the export.` : '');
+const overrunNote = () => ''; // the video now runs on to the end of the voice, so nothing is left out
 function setTakeSamples(samples, rate) {
   state.take = { samples, rate }; state.attempts = {}; saveAttempts(); mixCache = null;
   rebuildPeaks(samples); saveTake(); touched();
@@ -680,26 +709,30 @@ $('alane').onpointerdown = (e) => {
   const p = pieces()[+el.dataset.i];
   asel = { s: p.s, e: p.e }; setTrack('voice'); showEdit();
   lane.querySelectorAll('.ablk').forEach((b) => b.classList.toggle('sel', b === el));
-  adrag = { p, el, x0: e.clientX, perPx: vr().len / lane.getBoundingClientRect().width, d: 0, moved: false };
+  adrag = { p, el, i: +el.dataset.i, s0: vr().s, x0: e.clientX, perPx: vr().len / lane.getBoundingClientRect().width, d: 0, moved: false };
   addEventListener('pointermove', amove); addEventListener('pointerup', aup); addEventListener('pointercancel', aup);
 };
 function amove(e) {
   if (!adrag) return;
   const lane = $('alane');
+  edgeTrack(e);
   const dx = e.clientX - adrag.x0;
   if (!adrag.moved && Math.abs(dx) < 4) return;
   adrag.moved = true;
-  const m = magnet(adrag.p, dx * adrag.perPx, 10 * adrag.perPx);
+  if (!edge) edgeStart(amove);
+  const m = magnet(adrag.p, dx * adrag.perPx + (vr().s - adrag.s0), 10 * adrag.perPx);
+  m.d = Math.min(m.d, 3600 - adrag.p.e); // a recording is kept in memory, so there is a limit of an hour
   adrag.d = m.d;
-  adrag.el.classList.add('dragging');
-  adrag.el.style.left = pctE(adrag.p.s + m.d) + '%';
+  const el = lane.querySelector(`[data-i="${adrag.i}"]`);
+  el.classList.add('dragging');
+  el.style.left = pctE(adrag.p.s + m.d) + '%';
   lane.querySelector('.drop')?.remove();
   if (m.at !== null) { const line = Object.assign(document.createElement('div'), { className: 'drop' }); line.style.left = pctE(m.at) + '%'; lane.append(line); }
 }
 function aup(e) {
   const lane = $('alane');
   removeEventListener('pointermove', amove); removeEventListener('pointerup', aup); removeEventListener('pointercancel', aup);
-  const d = adrag; adrag = null;
+  const d = adrag; adrag = null; edgeStop();
   if (!d) return;
   lane.querySelector('.drop')?.remove();
   if (!d.moved || Math.abs(d.d) < 1e-3) { if (!d.moved) seekTo(toSrc(eAtX(e.clientX))); renderPieces(); return; }
@@ -709,6 +742,7 @@ function aup(e) {
 
 const SRC_TINT = ['', 's1', 's2', 's3'];
 function renderCuts() {
+  syncTail();
   const v = vr(), list = segs(), k = curIdx(), pct = (e) => ((e - v.s) / v.len) * 100;
   $('strip').innerHTML = list.map((s, i) => {
     const w = ((s.b - s.a) / s.r / v.len) * 100;
@@ -878,7 +912,7 @@ strip.onpointerdown = (e) => {
     pr: clips.findIndex((o, j) => joined(o, j, 'r')), pl: clips.findIndex((o, j) => joined(o, j, 'l')) };
   if (voiceFree) { // clips stay where they are put: remember where every clip starts, and move or trim only this one
     const items0 = realItems(), me = items0.findIndex((it) => it.c.a === c.a && it.c.b === c.b);
-    Object.assign(sdrag, { pr: -1, pl: -1, items0, me, at0: segs()[i].e0, len: (c.b - c.a) / c.r });
+    Object.assign(sdrag, { pr: -1, pl: -1, items0, me, at0: segs()[i].e0, len: (c.b - c.a) / c.r, s0: vr().s });
     if (me < 0) sdrag.edge = null; // an empty space is not dragged
   }
 };
@@ -890,10 +924,11 @@ strip.onpointermove = (e) => {
   sdrag.moved = true;
   if (!sdrag.saved) { checkpoint(); sdrag.saved = true; }
   if (sdrag.edge) (sdrag.items0 ? trimFree : trimEdge)(sdrag, dx * sdrag.perPx * sdrag.c0.r);
-  else (sdrag.items0 ? moveFree : moveHint)(e);
+  else if (sdrag.items0) { edgeTrack(e); if (!edge) edgeStart(moveFree); moveFree(e); }
+  else moveHint(e);
 };
 strip.onpointerup = strip.onpointercancel = (e) => {
-  const d = sdrag; sdrag = null;
+  const d = sdrag; sdrag = null; edgeStop();
   if (!d) return;
   strip.querySelector('.drop')?.remove();
   if (!d.moved) { // a plain click puts the playhead there
@@ -954,7 +989,7 @@ function trimFree(d, dg) {
 // dragging a clip anywhere: its edges cling to other clips, the start of the timeline and the edges of voice pieces
 function moveFree(e) {
   const d = sdrag, tol = 10 * d.perPx;
-  let at = Math.max(0, d.at0 + (e.clientX - d.x0) * d.perPx), snapAt = null;
+  let at = Math.max(0, d.at0 + (e.clientX - d.x0) * d.perPx + (vr().s - d.s0)), snapAt = null;
   const marks = [0, ...d.items0.filter((_, j) => j !== d.me).flatMap((it) => [it.at, it.at + (it.c.b - it.c.a) / it.c.r]), ...pieces().flatMap((p) => [p.s, p.e])];
   let best = null;
   for (const edge of [at, at + d.len]) for (const q of marks) {
@@ -1107,14 +1142,21 @@ $('ostrip').onpointerdown = (e) => {
   const i = +blk.dataset.i, c = ovl[i];
   osel = { o: c.o, a: c.a }; showEdit();
   strip.querySelectorAll('.blk').forEach((b) => b.classList.toggle('sel', b === blk));
-  odrag = { i, items0: asItems(), edge: edgeAt(blk, e.clientX), x0: e.clientX, perPx: vr().len / strip.getBoundingClientRect().width, moved: false, saved: false };
+  odrag = { i, items0: asItems(), edge: edgeAt(blk, e.clientX), x0: e.clientX, perPx: vr().len / strip.getBoundingClientRect().width, moved: false, saved: false, s0: vr().s };
   updateUI();
 };
 $('ostrip').onpointermove = (e) => {
+  const strip = $('ostrip');
+  if (!odrag) { const blk = e.target.closest?.('.blk'); strip.style.cursor = blk && edgeAt(blk, e.clientX) ? 'col-resize' : ''; return; }
+  edgeTrack(e);
+  if (!odrag.moved && Math.abs(e.clientX - odrag.x0) < 4) return;
+  if (!odrag.edge && !edge) edgeStart(omove);
+  omove(e);
+};
+function omove(e) {
   const d = odrag, strip = $('ostrip');
-  if (!d) { const blk = e.target.closest?.('.blk'); strip.style.cursor = blk && edgeAt(blk, e.clientX) ? 'col-resize' : ''; return; }
-  const dx = (e.clientX - d.x0) * d.perPx, c0 = d.items0[d.i];
-  if (!d.moved && Math.abs(e.clientX - d.x0) < 4) return;
+  if (!d) return;
+  const dx = (e.clientX - d.x0) * d.perPx + (d.edge ? 0 : vr().s - d.s0), c0 = d.items0[d.i];
   d.moved = true;
   if (!d.saved) { checkpoint(); d.saved = true; }
   const items = d.items0.map((c) => ({ ...c })), c = items[d.i];
@@ -1135,9 +1177,9 @@ $('ostrip').onpointermove = (e) => {
     return;
   }
   d.items = items; olayout(items); renderCuts(); touched();
-};
+}
 $('ostrip').onpointerup = $('ostrip').onpointercancel = (e) => {
-  const d = odrag, strip = $('ostrip'); odrag = null;
+  const d = odrag, strip = $('ostrip'); odrag = null; edgeStop();
   if (!d) return;
   strip.querySelector('.drop')?.remove();
   if (!d.moved) { seekTo(toSrc(eAtX(e.clientX, strip))); return; }
@@ -1457,6 +1499,7 @@ $('srt').onclick = () => {
 const RULER_STEPS = [0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
 function tlabel(t, step) { const m = Math.floor(t / 60), sec = t - m * 60; return `${m}:${sec.toFixed(step < 0.1 ? 2 : step < 1 ? 1 : 0).padStart(step < 0.1 ? 5 : step < 1 ? 4 : 2, '0')}`; }
 function drawWave() {
+  if (syncTail()) return renderCuts();
   const dpr = devicePixelRatio || 1;
   canvas.width = canvas.clientWidth * dpr;
   canvas.height = canvas.clientHeight * dpr;
@@ -1691,7 +1734,7 @@ function tick() {
     $('playhead').style.display = x < -0.3 || x > 100.3 ? 'none' : '';
     $('playhead').style.left = x + '%';
     // while playing or recording a zoomed timeline follows the playhead
-    if ((state.playing || state.recording) && v.len < v.L - 1e-6 && !scrubbing && (e > v.s + v.len * 0.97 || e < v.s)) setView(Math.max(0, e - v.len * 0.1), v.len);
+    if ((state.playing || state.recording) && view.len && !scrubbing && (e > v.s + v.len * 0.97 || e < v.s)) setView(Math.max(0, e - v.len * 0.1), v.len);
   }
   $('cur').textContent = fmt(toEdit(t));
   if (!state.recording) updateRecLabel();
@@ -2244,6 +2287,7 @@ const download = (blob) => Object.assign(document.createElement('a'), { href: UR
 $('export').onclick = async () => {
   const btn = $('export');
   stopAll();
+  if (syncTail()) renderCuts();
   // The save dialog has to open straight from the click, before any slow work.
   let handle = null;
   try { handle = await pickSaveTarget('voiceover.mp4'); } catch (e) { if (e.name === 'AbortError') return; }
