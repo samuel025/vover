@@ -81,6 +81,7 @@ function updateUI() {
   $('clipSpeed').disabled ||= onOv || onVo;
   document.querySelectorAll('#thead .th').forEach((el) => el.classList.toggle('sel', el.dataset.t === (onOv ? 'overlay' : onVo ? 'voice' : 'video')));
   $('linkVoice').checked = !voiceFree;
+  syncInspector();
   wrap.classList.toggle('gone', gone);
   if (gone) for (const k of ['cut', 'rec', 'play', 'toStart', 'back', 'fwd']) $(k).disabled = true;
   $('pauses').disabled = !idle || !hasTake() || voiceFree;
@@ -157,7 +158,7 @@ let scrubbing = false;
 // clicking the timeline takes the keyboard back from a menu or button, so Delete, B and the space bar act on the timeline
 const releaseFocus = () => { const a = document.activeElement; if (a && /SELECT|BUTTON/.test(a.tagName)) a.blur(); };
 timeline.addEventListener('pointerdown', releaseFocus, true);
-timeline.onpointerdown = (e) => { if (!canSeek()) return; setTrack(trackAtY(e.clientY), true); scrubbing = true; timeline.setPointerCapture(e.pointerId); scrubAt(e); };
+timeline.onpointerdown = (e) => { if (!canSeek() || e.button) return; setTrack(trackAtY(e.clientY), true); scrubbing = true; timeline.setPointerCapture(e.pointerId); scrubAt(e); };
 timeline.onpointermove = (e) => { if (scrubbing) scrubAt(e); };
 timeline.onpointerup = timeline.onpointercancel = () => { scrubbing = false; };
 
@@ -588,8 +589,8 @@ function unbakeVoice() {
 // The voice is either on its own track (the default: deleting or cutting video leaves the voice alone) or linked to the video.
 function syncMode() { $('linkVoice').checked = !voiceFree; }
 // the Add menu closes after a choice, or when you click elsewhere
-$('addMenu').addEventListener('click', (e) => { if (e.target.closest('label')) setTimeout(() => ($('addMenu').open = false), 0); });
-document.addEventListener('pointerdown', (e) => { if (!e.target.closest('#addMenu')) $('addMenu').open = false; });
+for (const m of document.querySelectorAll('details.addmenu')) m.addEventListener('click', (e) => { if (e.target.closest('label, button')) setTimeout(() => (m.open = false), 0); });
+document.addEventListener('pointerdown', (e) => { for (const m of document.querySelectorAll('details.addmenu')) if (!m.contains(e.target)) m.open = false; });
 $('linkVoice').onchange = (e) => {
   const free = !e.target.checked;
   e.target.blur();
@@ -691,10 +692,10 @@ function renderPieces() {
 }
 $('alane').onpointerdown = (e) => {
   const lane = $('alane'), el = e.target.closest('.ablk');
-  if (!el || !canSeek()) return;
+  if (!el || !canSeek() || e.button) return;
   e.stopPropagation();
   const p = pieces()[+el.dataset.i];
-  asel = { s: p.s, e: p.e }; setTrack('voice');
+  asel = { s: p.s, e: p.e }; setTrack('voice'); showEdit();
   lane.querySelectorAll('.ablk').forEach((b) => b.classList.toggle('sel', b === el));
   adrag = { p, el, x0: e.clientX, perPx: vr().len / lane.getBoundingClientRect().width, d: 0, moved: false };
   addEventListener('pointermove', amove); addEventListener('pointerup', aup); addEventListener('pointercancel', aup);
@@ -859,8 +860,9 @@ const strip = $('strip');
 let sdrag = null;
 const edgeAt = (blk, x) => { const r = blk.getBoundingClientRect(); return r.width < 18 ? null : x - r.left < 7 ? 'l' : r.right - x < 7 ? 'r' : null; };
 strip.onpointerdown = (e) => {
+  if (e.button) return;
   const blk = e.target.closest('.blk');
-  if (blk) { setTrack('video'); if (asel) { asel = null; renderPieces(); } } // Delete now acts on the video clip
+  if (blk) { setTrack('video'); showEdit(); if (asel) { asel = null; renderPieces(); } } // Delete now acts on the video clip
   if (!blk || !canSeek()) return;
   e.stopPropagation();
   strip.setPointerCapture(e.pointerId);
@@ -961,6 +963,86 @@ function moveFree(e) {
   strip.querySelector('.drop')?.remove();
   if (snapAt !== null) { const line = Object.assign(document.createElement('div'), { className: 'drop' }); line.style.left = pctE(snapAt) + '%'; strip.append(line); }
 }
+// ---------- the Edit tab: controls for whatever is selected ----------
+const showEdit = () => { if (!state.playing && !state.recording) setPanel('edit'); }; // not while you are reading the prompter
+const inspOv = () => (selIdx() >= 0 ? ovl[selIdx()] : activeOv());
+function syncInspector() {
+  const onOv = voiceFree && selTrack === 'overlay', which = onOv ? 'overlay' : onVoice() ? 'voice' : 'video';
+  document.querySelectorAll('[data-insp]').forEach((el) => { el.hidden = el.dataset.insp !== which; });
+  if (document.querySelector('.panel[data-panel=edit]').hidden) return;
+  const set = (id, v) => { const el = $(id), val = String(Math.round(v)); if (el !== document.activeElement && el.value !== val) el.value = val; };
+  if (which === 'overlay') {
+    const c = inspOv();
+    for (const id of ['iOvW', 'iOvX', 'iOvY', 'iOvCl', 'iOvCt', 'iOvCr', 'iOvCb', 'iOvFill', 'iOvReset']) $(id).disabled = !c;
+    $('inspOvInfo').textContent = c ? `${osources[c.o]?.name || 'Overlay'} · starts ${fmt(c.at)} · ${olen(c).toFixed(1)}s` : 'Click an overlay clip on the timeline.';
+    if (c) { ovBoxOf(c); set('iOvW', c.w * 100); set('iOvX', c.x * 100); set('iOvY', c.y * 100); set('iOvCl', c.cl * 100); set('iOvCt', c.ct * 100); set('iOvCr', c.cr * 100); set('iOvCb', c.cb * 100); }
+  } else if (which === 'voice') {
+    const p = chosenPiece();
+    $('inspVoiceInfo').textContent = !hasTake() ? 'No recording yet.' : p ? `Piece from ${fmt(p.s)} to ${fmt(p.e)} (${(p.e - p.s).toFixed(1)}s)` : 'Click a piece of the voice on the timeline.';
+  } else {
+    const k = curIdx(), g = k >= 0 ? segs()[k] : null;
+    $('inspVidInfo').textContent = !g ? 'Click a clip on the timeline.' : sources[g.src].blank ? `Empty space · ${((g.b - g.a) / g.r).toFixed(1)}s. Delete closes it.` : `Clip ${k + 1} of ${clips.length} · ${sources[g.src].name} · ${((g.b - g.a) / g.r).toFixed(1)}s`;
+  }
+}
+// moves one overlay setting, keeping the rest of the picture where it is (cropping reveals less of the same picture)
+function ovApply(c, key, v) {
+  ovBoxOf(c);
+  if (key === 'w') c.w = Math.max(0.05, v);
+  else if (key === 'x' || key === 'y') c[key] = v;
+  else {
+    const F = overlayFrame(), src = osources[c.o], vw = src?.vw || 16, vh = src?.vh || 9;
+    const S = (c.w * F.w) / (1 - c.cl - c.cr), Sh = (S * vh) / vw, was = { cl: c.cl, ct: c.ct };
+    const other = { cl: c.cr, cr: c.cl, ct: c.cb, cb: c.ct }[key];
+    c[key] = Math.max(0, Math.min(0.95 - other, v));
+    c.w = (S * (1 - c.cl - c.cr)) / F.w;
+    c.x += ((c.cl - was.cl) * S) / F.w; c.y += ((c.ct - was.ct) * Sh) / F.h;
+  }
+}
+let inspGesture = false;
+for (const [id, key] of Object.entries({ iOvW: 'w', iOvX: 'x', iOvY: 'y', iOvCl: 'cl', iOvCt: 'ct', iOvCr: 'cr', iOvCb: 'cb' })) {
+  $(id).addEventListener('input', () => {
+    const c = inspOv(), v = +$(id).value / 100; // read before the undo step, which refreshes the sliders
+    if (!c) return;
+    if (!inspGesture) { checkpoint(); inspGesture = true; }
+    ovApply(c, key, v);
+    if (activeOv() === c) placeOverlay(c);
+    touched();
+  });
+  $(id).addEventListener('change', () => { inspGesture = false; commitEdit(); });
+}
+$('iOvFill').onclick = () => { const c = inspOv(); if (c) ovTool('fill', c); };
+$('iOvReset').onclick = () => { const c = inspOv(); if (c) ovTool('reset', c); };
+$('iZoom').onclick = () => $('zoomAdd').click();
+
+// ---------- right-click menu ----------
+function hideCtx() { $('ctx').hidden = true; }
+document.addEventListener('pointerdown', (e) => { if (!$('ctx').contains(e.target)) hideCtx(); }, true);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideCtx(); });
+addEventListener('blur', hideCtx);
+$('ctx').onclick = (e) => { const b = e.target.closest('button'); if (!b) return; const fn = $('ctx')._fns[+b.dataset.i]; hideCtx(); fn(); };
+timeline.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  if (!canSeek()) return;
+  let track = trackAtY(e.clientY);
+  if (track === 'voice' && !voiceFree) track = 'video';
+  seekTo(toSrc(eAtX(e.clientX))); // the playhead goes where you clicked, so Split cuts there
+  const piece = track === 'voice' ? pieceAt(eAtX(e.clientX)) : null, ob = track === 'overlay' ? e.target.closest('.blk') : null;
+  if (piece) asel = { s: piece.s, e: piece.e }; else if (track === 'voice') asel = null;
+  if (ob) osel = { o: ovl[+ob.dataset.i].o, a: ovl[+ob.dataset.i].a };
+  setTrack(track, true); renderPieces(); renderCuts();
+  const items = [['Split here', splitHere]];
+  if (track === 'video') {
+    const gap = isBlankClip(clips[curIdx()]);
+    items.push([gap ? 'Close the gap' : 'Delete clip', deleteClip]);
+    if (!gap) { items.push(null, ['Speed 0.5×', () => setClipSpeed(0.5)], ['Speed 1×', () => setClipSpeed(1)], ['Speed 2×', () => setClipSpeed(2)], null, ['Add zoom here', () => $('zoomAdd').click()]); }
+  } else if (track === 'overlay') {
+    items.push(['Delete overlay', deleteOverlay], null, ['Fill the picture', () => { const c = inspOv(); if (c) ovTool('fill', c); }], ['Reset size and position', () => { const c = inspOv(); if (c) ovTool('reset', c); }]);
+  } else items.push(['Delete voice', voiceDelete]);
+  const fns = [], html = items.map((it) => (it ? `<button data-i="${fns.push(it[1]) - 1}">${it[0]}</button>` : '<hr>')).join('');
+  const m = $('ctx'); m._fns = fns; m.innerHTML = html; m.hidden = false;
+  m.style.left = Math.min(e.clientX, innerWidth - m.offsetWidth - 8) + 'px'; m.style.top = Math.min(e.clientY, innerHeight - m.offsetHeight - 8) + 'px';
+});
+
 // ---------- the overlay track ----------
 // A second video track above the main one. Its clips sit at times on the same timeline, play on top of the main video as a small window
 // (size and corner are in Picture & text), and can be cut, split, moved and trimmed like any other clip. Their own sound is not used.
@@ -1022,13 +1104,14 @@ function cutOverlay(lo, hi) {
 }
 let odrag = null;
 $('ostrip').onpointerdown = (e) => {
+  if (e.button) return;
   setTrack('overlay');
   const blk = e.target.closest('.blk'), strip = $('ostrip');
   if (!blk || !canSeek()) { updateUI(); return; } // empty space: the timeline just moves the playhead
   e.stopPropagation();
   strip.setPointerCapture(e.pointerId);
   const i = +blk.dataset.i, c = ovl[i];
-  osel = { o: c.o, a: c.a };
+  osel = { o: c.o, a: c.a }; showEdit();
   strip.querySelectorAll('.blk').forEach((b) => b.classList.toggle('sel', b === blk));
   odrag = { i, items0: asItems(), edge: edgeAt(blk, e.clientX), x0: e.clientX, perPx: vr().len / strip.getBoundingClientRect().width, moved: false, saved: false };
   updateUI();
@@ -1117,14 +1200,14 @@ function syncOverlay() {
 let obox = null;
 $('ovbox').onpointerdown = (e) => {
   const c = activeOv();
-  if (!c || !canSeek()) return;
+  if (!c || !canSeek() || e.button) return;
   e.stopPropagation(); e.preventDefault();
   const tool = e.target.closest('[data-t]')?.dataset.t;
   if (tool) return ovTool(tool, c);
   const F = overlayFrame(), b = { ...ovBoxOf(c) }, handle = e.target.closest('[data-h]')?.dataset.h || 'move';
   obox = { c, handle, x0: e.clientX, y0: e.clientY, b, F, moved: false };
   $('ovbox').setPointerCapture(e.pointerId);
-  setTrack('overlay'); osel = { o: c.o, a: c.a }; renderCuts();
+  setTrack('overlay'); osel = { o: c.o, a: c.a }; showEdit(); renderCuts();
 };
 $('ovbox').onpointermove = (e) => {
   const d = obox;
@@ -1625,7 +1708,7 @@ function tick() {
     const want = Math.min(16, (+$('rate').value || 1) * speedAt(t));
     if (Math.abs(video.playbackRate - want) > 1e-3) video.playbackRate = want;
   }
-  updateClip(); syncOverlay();
+  updateClip(); syncOverlay(); if (!document.querySelector('.panel[data-panel=edit]').hidden) syncInspector();
   applyZoomPreview(t); placeDots();
   if ($('caps').checked) {
     const c = captionList().find((x) => t >= x.t0 && t < x.t1);

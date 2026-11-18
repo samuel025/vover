@@ -288,3 +288,16 @@ body.app .stage>*:not(.stagebox){flex:none}
 
 .clipbar{gap:6px 8px}
 .clipbar .sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+
+/* file menu, side-panel cards, recording group, right-click menu */
+.addmenu.down .menu{top:calc(100% + 6px);bottom:auto}
+.addmenu .menu button{display:block;width:100%;text-align:left;border:0;background:none;padding:9px 12px;border-radius:8px;font:500 13px Inter;color:var(--text);cursor:pointer}
+.addmenu .menu button:hover{background:var(--hover)}
+.btnrow{display:flex;gap:8px;flex-wrap:wrap}
+[data-insp] .row input[type=range]{flex:1;min-width:0}
+.recgroup{background:#fff3f1;border:1px solid #f4c9c6;border-radius:12px;padding:5px 6px}
+.ctx{position:fixed;z-index:60;background:#fff;border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 28px #0003;padding:4px;min-width:200px}
+.ctx[hidden]{display:none}
+.ctx button{display:block;width:100%;text-align:left;border:0;background:none;padding:8px 12px;border-radius:7px;font:500 13px Inter;color:var(--text);cursor:pointer}
+.ctx button:hover{background:var(--hover)}
+.ctx hr{border:0;border-top:1px solid var(--border);margin:4px 0}

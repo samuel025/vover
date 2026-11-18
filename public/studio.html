@@ -13,10 +13,15 @@
 <header class="bar">
   <a class="brand" href="/"><span class="dot"></span>Voiceover Studio</a>
   <div class="bar-actions">
-    <button id="newProject" class="btn ghost" title="Clear everything and start with a blank workspace">New project</button>
-    <input id="file" type="file" accept="video/*" hidden />
-    <button id="saveWs" class="btn ghost" title="Save the whole workspace (videos, recording, edits, script, settings) as one file you can open later or on another computer">Save workspace</button>
-    <label class="btn ghost" for="openWs" title="Open a workspace file you saved before">Open workspace</label><input id="openWs" type="file" accept=".vover" hidden />
+    <details class="addmenu down" id="fileMenu">
+      <summary class="btn ghost">File ▾</summary>
+      <div class="menu">
+        <button id="newProject" title="Clear everything and start with a blank workspace">New project</button>
+        <label for="openWs" title="Open a workspace file you saved before">Open workspace…</label>
+        <button id="saveWs" title="Save the whole workspace (videos, recording, edits, script, settings) as one file you can open later or on another computer">Save workspace…</button>
+      </div>
+    </details>
+    <input id="file" type="file" accept="video/*" hidden /><input id="openWs" type="file" accept=".vover" hidden />
     <button id="export" class="btn primary" disabled>Export MP4</button>
   </div>
 </header>
@@ -73,12 +78,6 @@
       <button id="split" class="btn sm" title="Split at the playhead (B)" disabled>Split</button>
       <button id="cut" class="btn sm" title="Cut out a part: press at the start, move, press again at the end (X)" disabled>✂ Cut</button>
       <button id="delClip" class="btn sm" title="Delete the selected clip (Delete)" disabled>Delete</button>
-      <label class="chk">Speed
-        <select id="clipSpeed" disabled>
-          <option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option>
-          <option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option><option value="3">3×</option><option value="4">4×</option>
-        </select>
-      </label>
       <span class="gap"></span>
       <small class="sub" id="clipInfo"></small>
       <label class="chk" title="Tick to tie your voice to the video, so cutting or deleting video also removes the voice under it and closes the gap. Leave it off to edit them separately, like in a video editor"><input id="linkVoice" type="checkbox" /> Link voice to video</label>
@@ -108,13 +107,11 @@
         </select>
         <label class="chk"><input id="hear" type="checkbox" /> Hear original</label>
       </div>
-      <div class="group">
+      <div class="group recgroup">
         <button id="rec" class="btn rec" title="Record / stop (R)" disabled><span class="rdot"></span><span id="recLabel">Record</span></button>
         <button id="pauseRec" class="btn" hidden>Pause</button>
         <button id="redoLine" class="btn" hidden title="Go back to the start of this sentence and read it again (L)">↺ Redo line</button>
         <button id="trim" class="btn" title="Cut the take at the playhead (T)" disabled>Trim end here</button>
-        <button id="clear" class="btn ghost" disabled>Discard take</button>
-        <button id="expAudio" class="btn ghost" title="Save your recording as an audio file" disabled>Save audio</button>
         <input id="audioFile" type="file" accept="audio/*" hidden />
       </div>
     </div>
@@ -125,6 +122,7 @@
   <aside class="side card">
     <nav class="tabs" id="panelTabs">
       <button data-p="script" class="on">Script</button>
+      <button data-p="edit">Edit</button>
       <button data-p="takes">Takes</button>
       <button data-p="audio">Audio</button>
       <button data-p="picture">Picture</button>
@@ -163,6 +161,39 @@
         <label class="row">Text size <input id="fs" type="range" min="20" max="64" value="34" /></label>
         <label class="row check"><input id="mirror" type="checkbox" /> Mirror text</label>
       </div>
+    </section>
+      </div>
+      <div class="panel" data-panel="edit" hidden>
+    <section class="card opts" data-insp="overlay" hidden>
+      <h2>Overlay clip</h2>
+      <p class="sub" id="inspOvInfo"></p>
+      <label class="row">Size <input id="iOvW" type="range" min="5" max="200" /></label>
+      <label class="row">Left <input id="iOvX" type="range" min="-50" max="100" /></label>
+      <label class="row">Top <input id="iOvY" type="range" min="-50" max="100" /></label>
+      <label class="row">Crop left <input id="iOvCl" type="range" min="0" max="90" /></label>
+      <label class="row">Crop top <input id="iOvCt" type="range" min="0" max="90" /></label>
+      <label class="row">Crop right <input id="iOvCr" type="range" min="0" max="90" /></label>
+      <label class="row">Crop bottom <input id="iOvCb" type="range" min="0" max="90" /></label>
+      <div class="btnrow"><button id="iOvFill" class="btn sm">Fill the picture</button><button id="iOvReset" class="btn sm">Reset</button></div>
+      <p class="sub">You can also drag the overlay in the player: move it, drag a corner to resize, or press Crop on it.</p>
+    </section>
+    <section class="card opts" data-insp="video">
+      <h2>Video clip</h2>
+      <p class="sub" id="inspVidInfo"></p>
+      <label class="row">Speed
+        <select id="clipSpeed" disabled>
+          <option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option>
+          <option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option><option value="3">3×</option><option value="4">4×</option>
+        </select>
+      </label>
+      <button id="iZoom" class="btn sm">+ Add zoom at playhead</button>
+      <p class="sub">Drag a clip to move it, drag its edges to trim it. Right-click a clip for more.</p>
+    </section>
+    <section class="card opts" data-insp="voice" hidden>
+      <h2>Voice</h2>
+      <p class="sub" id="inspVoiceInfo"></p>
+      <div class="btnrow"><button id="clear" class="btn sm" disabled>Discard take</button><button id="expAudio" class="btn sm" title="Save your recording as an audio file" disabled>Save audio</button></div>
+      <p class="sub">Drag a piece to move it. Its edges snap to other pieces and to clips. Split with B, delete with Delete.</p>
     </section>
       </div>
       <div class="panel" data-panel="takes" hidden>
@@ -246,13 +277,14 @@
         <span><kbd>[</kbd><kbd>]</kbd> section back · next</span><span><kbd>M</kbd> next section starts now</span>
         <span><kbd>S</kbd> retake this section</span><span><kbd>X</kbd> cut start · end</span>
         <span><kbd>Esc</kbd> cancel a cut</span><span><kbd>B</kbd> split at playhead</span><span><kbd>+</kbd><kbd>−</kbd> zoom timeline · <kbd>0</kbd> fit</span><span><kbd>L</kbd> redo this line</span>
-        <span><kbd>Del</kbd> delete clip</span><span><kbd>Ctrl</kbd><kbd>Z</kbd> undo · <kbd>Shift</kbd> redo</span>
+        <span><kbd>Del</kbd> delete clip</span><span>Right-click a clip: menu</span><span><kbd>Ctrl</kbd><kbd>Z</kbd> undo · <kbd>Shift</kbd> redo</span>
       </div>
     </section>
       </div>
     </div>
   </aside>
 </main>
+<div class="ctx" id="ctx" hidden></div>
 <script src="app.js" type="module"></script>
 </body>
 </html>
