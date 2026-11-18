@@ -31,6 +31,7 @@
       </div>
       <video id="video" playsinline muted preload="auto" hidden></video>
       <video id="video2" playsinline muted preload="auto" hidden></video>
+      <video id="ovideo" playsinline muted preload="auto" hidden></video>
       <div class="caption" id="caption" hidden></div>
       <div class="zdot a" id="zdotA" hidden title="Where the zoom starts"></div>
       <div class="zdot b" id="zdotB" hidden title="Where the zoom ends"></div>
@@ -42,6 +43,7 @@
       <span class="tzoom"><button id="tzOut" class="btn sm icon" title="Zoom the timeline out (-)">−</button><span id="tzLevel" class="sub">Fit</span><button id="tzIn" class="btn sm icon" title="Zoom the timeline in (+). Ctrl + scroll also zooms, double-click a clip to zoom to it">+</button><button id="tzFit" class="btn sm" title="Show the whole timeline (0)">Fit</button></span>
       <span id="takeLen" class="sub"></span><span id="dur">0:00.0</span></div>
     <div class="timeline disabled" id="timeline">
+      <div class="ostrip" id="ostrip" title="Overlay track: a second video on top of the main one"></div>
       <div class="strip" id="strip"></div>
       <canvas id="wave"></canvas>
       <div class="alane" id="alane" hidden></div>
@@ -62,6 +64,8 @@
       <button id="delClip" class="btn sm" title="Delete the clip under the playhead (Delete)" disabled>Delete clip</button>
       <label class="btn sm" for="addFile" title="Add another video to the end of the timeline">+ Add video</label>
       <input id="addFile" type="file" accept="video/*" hidden />
+      <label class="btn sm" for="ovFile" title="Put another video on top of the main one, at the playhead. It becomes a clip on the overlay track that you can cut, move and trim">+ Overlay video</label>
+      <input id="ovFile" type="file" accept="video/*" hidden />
       <label class="chk">Clip speed
         <select id="clipSpeed" disabled>
           <option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option>
@@ -193,6 +197,8 @@
         <select id="shape"><option value="original">Original</option><option value="vertical">Vertical 9:16</option><option value="square">Square 1:1</option></select>
       </label>
       <label class="row" id="cropRow" hidden>Crop position <input id="crop" type="range" min="0" max="100" value="50" /></label>
+      <label class="row">Overlay size <select id="ovSize"><option value="25">25%</option><option value="35" selected>35%</option><option value="50">50%</option><option value="75">75%</option><option value="100">Fill the frame</option></select></label>
+      <label class="row">Overlay corner <select id="ovPos"><option value="br" selected>Bottom right</option><option value="bl">Bottom left</option><option value="tr">Top right</option><option value="tl">Top left</option><option value="c">Centre</option></select></label>
       <label class="row check"><input id="caps" type="checkbox" /> Captions from my script</label>
       <button id="srt" class="btn sm" disabled>Download captions (.srt)</button>
       <label class="row">Intro title <input id="introText" type="text" placeholder="e.g. How to get started" /></label>

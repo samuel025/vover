@@ -39,7 +39,7 @@ video{width:100%;height:100%;object-fit:contain;background:#000}
 .badge.paused i{animation:none;background:#aaa}
 
 .times{display:flex;justify-content:space-between;color:var(--text);font-variant-numeric:tabular-nums;font-size:13px;font-weight:500;margin-bottom:-4px}
-.timeline{position:relative;height:124px;background:var(--hover);border:1px solid var(--border);border-radius:12px;overflow:hidden;cursor:ew-resize;touch-action:none}
+.timeline{position:relative;height:154px;background:var(--hover);border:1px solid var(--border);border-radius:12px;overflow:hidden;cursor:ew-resize;touch-action:none}
 .timeline.disabled{opacity:.5;pointer-events:none}
 .timeline canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 .playhead{position:absolute;top:0;bottom:0;width:2px;margin-left:-1px;background:var(--text);pointer-events:none}
@@ -145,9 +145,9 @@ kbd{font:500 11px Inter;border:1px solid var(--border);border-bottom-width:2px;b
 .video-wrap.gone::after{content:"Everything was deleted. Press Undo to bring it back.";position:absolute;color:#fff;font:500 14px Inter;text-align:center;padding:0 24px}
 
 /* clip strip: the clips in timeline order, above the waveform */
-.timeline canvas{top:30px;height:calc(100% - 30px)}
+.timeline canvas{top:60px;height:calc(100% - 60px)}
 .marks,.cuts{top:30px}
-.strip{position:absolute;left:0;right:0;top:0;height:30px;background:#0000000a;border-bottom:1px solid var(--border);touch-action:none}
+.strip{position:absolute;left:0;right:0;top:30px;height:30px;background:#0000000a;border-bottom:1px solid var(--border);touch-action:none}
 .blk{position:absolute;top:3px;bottom:3px;border-radius:7px;background:#ffb88e;border:1px solid #00000026;box-sizing:border-box;overflow:hidden;cursor:grab;display:flex;align-items:center;padding:0 9px;font:600 11px Inter;color:#4a2a12;white-space:nowrap;user-select:none}
 .blk.s1{background:#a9c3ff;color:#1d2f66}.blk.s2{background:#b8e6c1;color:#17421f}.blk.s3{background:#e6c1f0;color:#4a1d57}
 .blk.sel{outline:2px solid var(--text);outline-offset:-2px}
@@ -227,7 +227,7 @@ body.app .stage>*:not(.video-wrap){flex:none}
 #video2{visibility:hidden}
 
 /* voice pieces: lie over the waveform when edits change only the voice */
-.alane{position:absolute;left:0;right:0;top:30px;bottom:14px;pointer-events:none}
+.alane{position:absolute;left:0;right:0;top:60px;bottom:14px;pointer-events:none}
 .ablk{position:absolute;top:2px;bottom:2px;border:1.5px solid #c8601f;background:#f08a4b22;border-radius:6px;box-sizing:border-box;pointer-events:auto;cursor:grab;min-width:3px}
 .ablk:hover{background:#f08a4b3d}
 .ablk.sel{border-color:var(--text);background:#f08a4b44}
@@ -237,3 +237,10 @@ body.app .stage>*:not(.video-wrap){flex:none}
 /* empty space in the video track */
 .blk.gap{background:repeating-linear-gradient(45deg,#0000000d 0 6px,transparent 6px 12px);border:1px dashed #00000040;color:#737373;cursor:pointer;justify-content:center}
 .blk.gap::before,.blk.gap::after{display:none}
+
+/* overlay track and window */
+.ostrip{position:absolute;left:0;right:0;top:0;height:30px;background:#0000000f;border-bottom:1px solid var(--border);touch-action:none}
+.ostrip:empty::before{content:"Overlay track: add a video on top with + Overlay video";position:absolute;left:10px;top:50%;transform:translateY(-50%);font:500 11px Inter;color:#9a9a9a;pointer-events:none}
+.blk.ovl{background:#f4b6d6;color:#5a1f43}
+.timeline.disabled .ostrip{pointer-events:none}
+.video-wrap #ovideo{position:absolute;inset:auto;object-fit:contain;border-radius:4px;box-shadow:0 2px 12px #0006;background:#000;z-index:2}

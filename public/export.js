@@ -61,7 +61,7 @@ function drawCaption(g, W, H, text) {
 // segs: the clips in timeline order, [{ src, a, b, r }] with a and b in seconds inside that video and r the speed.
 // voice: finished audio, already edited and padded for any title cards.
 // fx: { shape, crop, captions, zooms, intro: { text, sec }, outro: { text, sec } } (caption and zoom times are in project time).
-export async function exportLocally({ sources, voice, segs, fx = {}, saveHandle, onProgress }) {
+export async function exportLocally({ sources, voice, segs, overlay = null, fx = {}, saveHandle, onProgress }) {
   if (!('AudioEncoder' in window)) throw new Unsupported('This browser cannot encode audio.');
   if (!segs.length) throw new Unsupported('There is nothing left in the timeline to export.');
 
@@ -77,6 +77,15 @@ export async function exportLocally({ sources, voice, segs, fx = {}, saveHandle,
   const firstSeg = segs.find((x) => !blank(x.src));
   if (!firstSeg) throw new Unsupported('There is no video left in the timeline to export.');
   const first = tracks[firstSeg.src];
+  // the overlay track: a window of another video drawn on top of every frame it covers
+  const ovFiles = new Map();
+  for (const c of overlay?.clips || []) {
+    if (ovFiles.has(c.file)) continue;
+    const video = await new Input({ source: new BlobSource(c.file), formats: ALL_FORMATS }).getPrimaryVideoTrack();
+    if (!video) throw new Unsupported('An overlay file has no video track.');
+    ovFiles.set(c.file, { video, sink: new VideoSampleSink(video) });
+  }
+  const oclips = (overlay?.clips || []).map((c) => ({ ...c, tr: ovFiles.get(c.file), it: null, cur: null, nxt: null })).sort((x, y) => x.at - y.at);
   const multi = Object.keys(tracks).length > 1 || segs.some((x) => blank(x.src));
 
   const format = new Mp4OutputFormat({ fastStart: saveHandle ? false : 'in-memory' });
@@ -87,7 +96,7 @@ export async function exportLocally({ sources, voice, segs, fx = {}, saveHandle,
   const intro = fx.intro?.sec > 0 ? fx.intro : null, outro = fx.outro?.sec > 0 ? fx.outro : null;
   const shape = SHAPES[fx.shape] ? fx.shape : 'original';
   const zooms = fx.zooms || [];
-  const look = !!(fx.captions?.length || intro || outro || zooms.length || shape !== 'original'); // anything that has to be drawn onto the frames
+  const look = !!(fx.captions?.length || intro || outro || zooms.length || oclips.length || shape !== 'original'); // anything that has to be drawn onto the frames
   const same = !multi && segs.length === 1 && segs[0].r === 1 && segs[0].a < 1e-3 && Math.abs(segs[0].b - first.duration) < 0.02;
   const mode = look || multi ? 'canvas' : same ? 'copy' : 'samples';
   const content = segs.reduce((n, g) => n + (g.b - g.a) / g.r, 0);
@@ -154,6 +163,29 @@ export async function exportLocally({ sources, voice, segs, fx = {}, saveHandle,
     vsource.close();
   };
 
+  // the overlay picture for timeline time e: frames are read in order, so each clip's frames are walked through once
+  const drawOverlay = async (e) => {
+    const c = oclips.find((x) => e >= x.at && e < x.at + (x.b - x.a));
+    if (!c) return;
+    const t = c.a + (e - c.at);
+    c.it ||= c.tr.sink.samples(c.a, c.b)[Symbol.asyncIterator]();
+    for (;;) {
+      c.nxt ||= (await c.it.next()).value;
+      if (!c.nxt || c.nxt.timestamp > t) break;
+      c.cur?.close(); c.cur = c.nxt; c.nxt = null;
+    }
+    if (!c.cur) return;
+    const dw = c.tr.video.displayWidth, dh = c.tr.video.displayHeight;
+    let w = outW * overlay.size, h = (w * dh) / dw, x, y;
+    if (overlay.size >= 0.99) { const k = Math.min(outW / dw, outH / dh); w = dw * k; h = dh * k; x = (outW - w) / 2; y = (outH - h) / 2; }
+    else {
+      const m = outW * 0.03, pos = overlay.pos;
+      x = pos.includes('l') ? m : pos === 'c' ? (outW - w) / 2 : outW - w - m;
+      y = pos.includes('t') ? m : pos === 'c' ? (outH - h) / 2 : outH - h - m;
+    }
+    c.cur.draw(g, 0, 0, dw, dh, x, y, w, h);
+  };
+
   const encodeVideo = async () => {
     const caps = fx.captions || [];
     let outAt = lead, ci = 0;
@@ -166,12 +198,14 @@ export async function exportLocally({ sources, voice, segs, fx = {}, saveHandle,
       const { a, b, r } = seg, off = sources[seg.src].off;
       if (blank(seg.src)) { // empty space: black frames, with any captions that fall in it
         const len = (b - a) / r;
-        for (let t = 0; t < len; t += 0.1) {
+        const step = oclips.length ? 1 / 30 : 0.1; // smoother when an overlay is playing in the space
+        for (let t = 0; t < len; t += step) {
           const gt = off + a + t * r;
           g.fillStyle = '#000'; g.fillRect(0, 0, outW, outH);
+          await drawOverlay(outAt - lead + t);
           const c = caps.find((x) => gt >= x.t0 && gt < x.t1);
           if (c) drawCaption(g, outW, outH, c.text);
-          await vsource.add(outAt + t, Math.min(0.1, len - t));
+          await vsource.add(outAt + t, Math.min(step, len - t));
         }
         outAt += len; onProgress?.(Math.min(1, outAt / total));
         continue;
@@ -186,6 +220,7 @@ export async function exportLocally({ sources, voice, segs, fx = {}, saveHandle,
           const gt = off + s.timestamp; // captions and zooms are timed in project time, and clips can be played in any order
           const pl = pl0 || place(tr.video.displayWidth, tr.video.displayHeight, zoomState(zooms, gt));
           s.draw(g, pl.sx, pl.sy, pl.sw, pl.sh, pl.dx, pl.dy, pl.dW, pl.dH);
+          await drawOverlay(outAt - lead + rel);
           if (!(caps[ci] && gt >= caps[ci].t0 && gt < caps[ci].t1)) ci = caps.findIndex((c) => gt >= c.t0 && gt < c.t1);
           if (ci >= 0 && caps[ci]) drawCaption(g, outW, outH, caps[ci].text);
           await vsource.add(outAt + rel, Math.max(s.duration / r, 0.001));
@@ -199,6 +234,7 @@ export async function exportLocally({ sources, voice, segs, fx = {}, saveHandle,
       outAt += (b - a) / r;
     }
     if (outro) await card(outro.text, outAt, outro.sec);
+    for (const c of oclips) { c.cur?.close(); c.nxt?.close(); await c.it?.return?.(); }
     vsource.close();
   };
 

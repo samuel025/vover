@@ -13,7 +13,7 @@ let base = new Float32Array(0), chunks = [], chunkLen = 0, capturing = false;
 let spans = [], lastNow = -1, lastSec = -1;
 let speed = 1;
 let capStart = 0, draft = null;
-let cutStart = null, editVer = 0, history = [], future = [], music = null, musicId = 0, takes = [], playK = -1, voiceFree = true, selTrack = 'video', zooms = [], zsel = null, pick = null, zoomDirty = false, vsp = [], asel = null, editVoice = false;
+let cutStart = null, editVer = 0, history = [], future = [], music = null, musicId = 0, takes = [], playK = -1, voiceFree = true, selTrack = 'video', zooms = [], zsel = null, pick = null, zoomDirty = false, vsp = [], asel = null, editVoice = false, osources = [], ovl = [], osel = null;
 let cleaned = null, cleaning = null, finalCache = {}, abCache = null, lastClipKey = '', lastCap = null;
 
 const B = 1024; // samples per waveform bucket
@@ -75,7 +75,7 @@ function updateUI() {
   $('undo').disabled = !idle || !history.length; $('redo').disabled = !idle || !future.length;
   const gone = v && !!total() && editedLen() < 0.05; // every clip was deleted
   for (const k of ['split', 'clipSpeed', 'delClip']) $(k).disabled = !idle || gone;
-  $('split').textContent = editVoice ? 'Split voice' : 'Split'; $('delClip').textContent = editVoice ? 'Delete voice' : 'Delete clip'; $('clipSpeed').disabled ||= editVoice;
+  const onOv = voiceFree && !editVoice && selTrack === 'overlay'; $('split').textContent = editVoice ? 'Split voice' : onOv ? 'Split overlay' : 'Split'; $('delClip').textContent = editVoice ? 'Delete voice' : onOv ? 'Delete overlay' : 'Delete clip'; $('clipSpeed').disabled ||= editVoice;
   wrap.classList.toggle('gone', gone);
   if (gone) for (const k of ['cut', 'rec', 'play', 'toStart', 'back', 'fwd']) $(k).disabled = true;
   $('pauses').disabled = !idle || !hasTake() || voiceFree;
@@ -261,7 +261,7 @@ const gapsOf = () => { // parts of the videos that no clip uses (they were cut o
   return out;
 };
 // true when the export could be done by cutting the one video alone: no moving, no speed changes, no second video
-const plainEdit = () => sources.length === 1 && clips.every((c, i) => c.r === 1 && (i === 0 || c.a >= clips[i - 1].b - 1e-6));
+const plainEdit = () => !ovl.length && sources.length === 1 && clips.every((c, i) => c.r === 1 && (i === 0 || c.a >= clips[i - 1].b - 1e-6));
 
 // ---------- gaps: clips that sit wherever they are put ----------
 // With the voice on its own track the video track works like a normal editor: deleting or moving a clip leaves empty space instead of
@@ -278,6 +278,7 @@ function layout(items) {
     if (at - end > 0.02) out.push({ a: 0, b: at - end, r: 1, gap: true });
     out.push(it.c); end = at + (it.c.b - it.c.a) / it.c.r;
   }
+  if (oEnd() - end > 0.02) out.push({ a: 0, b: oEnd() - end, r: 1, gap: true }); // an overlay running past the main video: empty space to hold it
   const dur = out.reduce((n, c) => n + (c.gap ? c.b : 0), 0);
   sources = dur > 0 ? [...real, { id: 'gap', name: 'Gap', blank: true, dur, off: base }] : real;
   let o = base;
@@ -358,9 +359,9 @@ $('tscroll').onpointerup = $('tscroll').onpointercancel = () => { barDrag = null
 
 function newProject() {
   discardTake();
-  view = { s: 0, len: 0 }; voiceFree = true; vsp = []; asel = null; syncMode(); sources = []; clips = []; zooms = []; zsel = null; pick = null; loaded = -1; takes = []; cutStart = null; history = []; future = []; touched();
+  view = { s: 0, len: 0 }; voiceFree = true; vsp = []; asel = null; ovl = []; osources = []; osel = null; syncMode(); sources = []; clips = []; zooms = []; zsel = null; pick = null; loaded = -1; takes = []; cutStart = null; history = []; future = []; touched();
   try { localStorage.removeItem('project'); localStorage.removeItem('marks'); } catch {}
-  kv.get('sources').then((m) => { for (const x of m || []) kv.del('src-' + x.id); kv.del('video'); }).then(() => kv.del('takes'));
+  kv.get('sources').then((m) => { for (const x of m || []) kv.del('src-' + x.id); kv.del('video'); }).then(() => kv.get('osources')).then((m) => { for (const x of m || []) kv.del('osrc-' + x.id); kv.del('osources'); }).then(() => kv.del('takes'));
 }
 async function addSource(file, id) {
   const { dur, url } = await probe(file);
@@ -369,7 +370,7 @@ async function addSource(file, id) {
   return s;
 }
 const saveSources = () => kv.set('sources', sources.map(({ id, name, dur, blank }) => ({ id, name, dur, blank })));
-function saveProject() { try { localStorage.setItem('project', JSON.stringify({ total: total(), clips, zooms, voiceFree, vsp })); } catch {} }
+function saveProject() { try { localStorage.setItem('project', JSON.stringify({ total: total(), clips, zooms, voiceFree, vsp, ovl })); } catch {} }
 
 async function showProject(msg) {
   state.file = sources[0]?.file || null;
@@ -450,12 +451,13 @@ async function saveWorkspace() {
     const parts = [], blobs = [];
     const add = (name, blob, extra = {}) => { parts.push({ name, len: blob.size, ...extra }); blobs.push(blob); };
     for (const x of sources) if (!x.blank) add('src:' + x.id, x.file, { type: x.file.type, fname: x.file.name });
+    for (const x of osources) add('osrc:' + x.id, x.file, { type: x.file.type, fname: x.file.name });
     if (hasTake()) add('take', new Blob([state.take.samples]));
     for (const t of takes) add('take:' + t.id, new Blob([t.samples]));
     const mus = await kv.get('music');
     if (mus?.file) add('music', mus.file, { type: mus.file.type, fname: mus.file.name });
     const head = {
-      v: 1, sources: sources.map(({ id, name, dur, blank }) => ({ id, name, dur, blank })), project: JSON.stringify({ total: total(), clips, zooms, voiceFree, vsp }),
+      v: 1, sources: sources.map(({ id, name, dur, blank }) => ({ id, name, dur, blank })), project: JSON.stringify({ total: total(), clips, zooms, voiceFree, vsp, ovl }), osources: osources.map(({ id, name, dur }) => ({ id, name, dur })),
       script: scriptEl.value, marks: lsGet('marks'), fx: lsGet('fx'), takeRate: state.take?.rate, takeCounter,
       takes: takes.map(({ id, name, stars, at, rate, free }) => ({ id, name, stars, at, rate, free })), parts,
     };
@@ -479,12 +481,15 @@ async function openWorkspace(file) {
     for (const p of h.parts) { blobs[p.name] = { blob: file.slice(at, at + p.len, p.type || ''), p }; at += p.len; }
     // clear what is stored now, then store the workspace
     for (const x of (await kv.get('sources')) || []) kv.del('src-' + x.id);
+    for (const x of (await kv.get('osources')) || []) kv.del('osrc-' + x.id);
     for (const x of ((await kv.get('takes'))?.list) || []) kv.del('take-' + x.id);
     for (const k of ['take', 'attempts', 'music', 'draft', 'video']) await kv.del(k);
     clearTimeout(takeTimer); takeTimer = 0; state.take = null; // a pending save of the old voice must not overwrite this one
     const fileOf = ({ blob, p }) => new File([blob], p.fname || 'file', { type: p.type || '' });
     await kv.set('sources', h.sources);
     for (const x of h.sources) if (!x.blank) await kv.set('src-' + x.id, { file: fileOf(blobs['src:' + x.id]) });
+    await kv.set('osources', h.osources || []);
+    for (const x of h.osources || []) await kv.set('osrc-' + x.id, { file: fileOf(blobs['osrc:' + x.id]) });
     if (blobs.take) await kv.set('take', { samples: new Float32Array(await blobs.take.blob.arrayBuffer()), rate: h.takeRate });
     for (const t of h.takes || []) if (blobs['take:' + t.id]) await kv.set('take-' + t.id, { samples: new Float32Array(await blobs['take:' + t.id].blob.arrayBuffer()) });
     await kv.set('takes', { n: h.takeCounter || 0, list: h.takes || [] });
@@ -499,12 +504,12 @@ $('openWs').onchange = (e) => { openWorkspace(e.target.files[0]); e.target.value
 $('addFile').onchange = (e) => { addVideo(e.target.files[0]); e.target.value = ''; };
 
 // undo / redo: a snapshot is the clips, the videos and the recorded voice (the voice arrays are never changed in place, so keeping them is cheap)
-const snap = () => ({ clips: JSON.stringify(clips), zooms: JSON.stringify(zooms), voiceFree, vsp: vsp.slice(), sources: sources.slice(), take: state.take ? { samples: state.take.samples, rate: state.take.rate } : null });
+const snap = () => ({ clips: JSON.stringify(clips), zooms: JSON.stringify(zooms), voiceFree, vsp: vsp.slice(), sources: sources.slice(), ovl: JSON.stringify(ovl), osources: osources.slice(), take: state.take ? { samples: state.take.samples, rate: state.take.rate } : null });
 function checkpoint() { history.push(snap()); if (history.length > 15) history.shift(); future = []; updateUI(); }
 function applySnap(sn) {
   const keepE = sources.length && loaded >= 0 ? toEdit(gNow()) : 0, was = sources[loaded];
   const sameTake = (state.take?.samples || null) === (sn.take?.samples || null), sameSources = sources.length === sn.sources.length && sources.every((x, i) => x === sn.sources[i]);
-  clips = JSON.parse(sn.clips); zooms = JSON.parse(sn.zooms); voiceFree = !!sn.voiceFree; vsp = (sn.vsp || []).slice(); asel = null; syncMode(); zsel = null; pick = null; sources = sn.sources.slice(); cutStart = null;
+  clips = JSON.parse(sn.clips); zooms = JSON.parse(sn.zooms); voiceFree = !!sn.voiceFree; vsp = (sn.vsp || []).slice(); asel = null; ovl = JSON.parse(sn.ovl || '[]'); osources = (sn.osources || []).slice(); osel = null; syncMode(); zsel = null; pick = null; sources = sn.sources.slice(); cutStart = null;
   if (loaded >= sources.length || sources[loaded] !== was) loaded = -1;
   state.take = sn.take ? { ...sn.take } : null; mixCache = null;
   if (!sameTake) rebuildPeaks(state.take?.samples || new Float32Array(0));
@@ -567,6 +572,7 @@ function syncMode() { if (!voiceFree) editVoice = false; $('editMode').value = !
 $('editMode').onchange = (e) => {
   const mode = e.target.value, free = mode !== 'both';
   e.target.blur();
+  if (!free && ovl.length) { syncMode(); return status('Delete the overlay clips first: linked mode ties everything to the main video, so it cannot hold overlays.'); }
   if (!canSeek()) { syncMode(); return status('Stop recording first.'); }
   if (free !== voiceFree) {
     stopPlay(); archiveTake(); checkpoint();
@@ -668,7 +674,7 @@ $('alane').onpointerdown = (e) => {
   if (!el || !canSeek()) return;
   e.stopPropagation();
   const p = pieces()[+el.dataset.i];
-  asel = { s: p.s, e: p.e }; selTrack = 'voice';
+  asel = { s: p.s, e: p.e }; selTrack = 'voice'; updateUI();
   lane.querySelectorAll('.ablk').forEach((b) => b.classList.toggle('sel', b === el));
   adrag = { p, el, x0: e.clientX, perPx: vr().len / lane.getBoundingClientRect().width, d: 0, moved: false };
   addEventListener('pointermove', amove); addEventListener('pointerup', aup); addEventListener('pointercancel', aup);
@@ -706,6 +712,7 @@ function renderCuts() {
     const label = `${i + 1}${s.r !== 1 ? ` · ${s.r}×` : ''}${sources.length > 1 ? ` · ${esc(sources[s.src].name)}` : ''}`;
     return `<div class="blk ${SRC_TINT[s.src % 4]}${i === k ? ' sel' : ''}" data-i="${i}" style="left:${pct(s.e0)}%;width:${w}%" title="${esc(sources[s.src]?.name || '')}"><span>${label}</span></div>`;
   }).join('');
+  $('ostrip').innerHTML = ovl.map((c, i) => `<div class="blk ovl${i === selIdx() ? ' sel' : ''}" data-i="${i}" style="left:${pct(c.at)}%;width:${(olen(c) / v.len) * 100}%" title="${esc(osources[c.o]?.name || '')}"><span>${esc(osources[c.o]?.name || 'Overlay')}</span></div>`).join('');
   // a dot where a clip was split in two, a red line where something was cut out or clips from different places meet
   $('cuts').innerHTML = list.slice(1).map((s, i) => {
     const prev = list[i], joined = Math.abs(prev.b - s.a) < 1e-3 && prev.src === s.src && prev.r === s.r;
@@ -766,6 +773,7 @@ function cutPress() {
   if (hi - lo < 0.1) return status('Move the playhead away from the start point first.');
   cutStart = null;
   if (editVoice) { renderCuts(); return voiceCut(lo, hi); }
+  if (voiceFree && selTrack === 'overlay') { renderCuts(); return cutOverlay(lo, hi); }
   checkpoint();
   if (voiceFree) cutFree(lo, hi); else for (const [a, b] of spansForEdited(lo, hi)) removeSpan(a, b);
   commitEdit();
@@ -778,6 +786,7 @@ $('cut').onclick = cutPress;
 function splitHere() {
   if (!canSeek()) return;
   if (editVoice) return voiceSplit(toEdit(gNow()));
+  if (voiceFree && selTrack === 'overlay') return splitOverlay(toEdit(gNow()));
   const g = gNow(), k = clipIndexAt(g), c = clips[k];
   if (!c || g - c.a < 0.15 || c.b - g < 0.15) return status('Move the playhead into the middle of a clip to split it.');
   checkpoint(); clips.splice(k, 1, { ...c, b: g }, { ...c, a: g }); commitEdit();
@@ -785,6 +794,7 @@ function splitHere() {
 }
 function deleteClip() {
   if (!canSeek()) return;
+  if (voiceFree && !editVoice && selTrack === 'overlay') return deleteOverlay();
   if (editVoice || (voiceFree && selTrack === 'voice')) return voiceDelete(); // the voice piece was the last thing clicked
   const k = curIdx();
   if (k < 0) return;
@@ -830,7 +840,7 @@ let sdrag = null;
 const edgeAt = (blk, x) => { const r = blk.getBoundingClientRect(); return r.width < 18 ? null : x - r.left < 7 ? 'l' : r.right - x < 7 ? 'r' : null; };
 strip.onpointerdown = (e) => {
   const blk = e.target.closest('.blk');
-  if (blk) { selTrack = 'video'; if (asel) { asel = null; renderPieces(); } } // Delete now acts on the video clip
+  if (blk) { selTrack = 'video'; updateUI(); if (asel) { asel = null; renderPieces(); } } // Delete now acts on the video clip
   if (!blk || !canSeek() || editVoice) return; // with voice-only edits the clips just move the playhead
   e.stopPropagation();
   strip.setPointerCapture(e.pointerId);
@@ -931,6 +941,142 @@ function moveFree(e) {
   strip.querySelector('.drop')?.remove();
   if (snapAt !== null) { const line = Object.assign(document.createElement('div'), { className: 'drop' }); line.style.left = pctE(snapAt) + '%'; strip.append(line); }
 }
+// ---------- the overlay track ----------
+// A second video track above the main one. Its clips sit at times on the same timeline, play on top of the main video as a small window
+// (size and corner are in Picture & text), and can be cut, split, moved and trimmed like any other clip. Their own sound is not used.
+const olen = (c) => (c.b - c.a) / c.r;
+const oEnd = () => ovl.reduce((m, c) => Math.max(m, c.at + olen(c)), 0);
+const selIdx = () => (osel ? ovl.findIndex((c) => c.o === osel.o && Math.abs(c.a - osel.a) < 1e-3) : -1);
+const saveOSources = () => kv.set('osources', osources.map(({ id, name, dur }) => ({ id, name, dur })));
+function olayout(items) { // clips that overlap are pushed along rather than stacked
+  let end = 0;
+  ovl = items.slice().sort((x, y) => x.at - y.at).map((c) => { const at = Math.max(c.at, end); end = at + olen(c); return { ...c, at }; });
+  layout(realItems()); // the main track gets empty space after it if an overlay runs past its end
+  touched();
+}
+const asItems = () => ovl.map((c) => ({ ...c }));
+async function addOverlay(file) {
+  if (!file) return;
+  if (!sources.length) return status('Add the main video first, then an overlay on top of it.');
+  if (!voiceFree) return status('Overlays need "Edits change" set to "video and voice separate".');
+  if (state.recording && !state.recPaused) return status('Stop recording first.');
+  stopPlay();
+  try {
+    const { dur, url } = await probe(file), s = { id: crypto.randomUUID(), name: file.name, file, url, dur };
+    checkpoint();
+    osources.push(s);
+    olayout([...asItems(), { o: osources.length - 1, a: 0, b: dur, r: 1, at: toEdit(gNow()) }]);
+    osel = { o: osources.length - 1, a: 0 }; selTrack = 'overlay';
+    kv.set('osrc-' + s.id, { file }); saveOSources();
+    commitEdit(); updateUI();
+    status(`Added ${file.name} on the overlay track at the playhead. Drag it, trim its edges, split it (B) or delete it. Size and corner are in Picture & text.`);
+  } catch { status('This browser cannot play that video. Try an MP4 (H.264) or WebM file.'); }
+}
+$('ovFile').onchange = (e) => { addOverlay(e.target.files[0]); e.target.value = ''; };
+function splitOverlay(e) {
+  const k = ovl.findIndex((c) => e > c.at + 0.15 && e < c.at + olen(c) - 0.15);
+  if (k < 0) return status('Move the playhead into the middle of the overlay clip to split it.');
+  const c = ovl[k], m = c.a + (e - c.at) * c.r, items = asItems();
+  checkpoint(); items.splice(k, 1, { ...c, b: m }, { ...c, a: m, at: e });
+  olayout(items); osel = { o: c.o, a: m }; commitEdit();
+  status(`Split the overlay at ${fmt(e)}. Click a part and press Delete, or drag it.`);
+}
+function deleteOverlay() {
+  const e = toEdit(gNow()), k = selIdx() >= 0 ? selIdx() : ovl.findIndex((c) => e >= c.at && e < c.at + olen(c));
+  if (k < 0) return status('Click an overlay clip first.');
+  checkpoint(); olayout(asItems().filter((_, j) => j !== k)); osel = null; commitEdit();
+  status('Deleted the overlay clip. The main video is untouched.');
+}
+function cutOverlay(lo, hi) {
+  const items = [];
+  for (const c of ovl) {
+    const e1 = c.at + olen(c);
+    if (hi <= c.at || lo >= e1) { items.push({ ...c }); continue; }
+    if (lo > c.at + 0.01) items.push({ ...c, b: c.a + (lo - c.at) * c.r });
+    if (hi < e1 - 0.01) items.push({ ...c, a: c.a + (hi - c.at) * c.r, at: hi });
+  }
+  checkpoint(); olayout(items); osel = null; commitEdit();
+  status(`Cut ${(hi - lo).toFixed(1)}s out of the overlay. The main video is untouched.`);
+}
+let odrag = null;
+$('ostrip').onpointerdown = (e) => {
+  selTrack = 'overlay';
+  const blk = e.target.closest('.blk'), strip = $('ostrip');
+  if (!blk || !canSeek()) { updateUI(); return; } // empty space: the timeline just moves the playhead
+  e.stopPropagation();
+  strip.setPointerCapture(e.pointerId);
+  const i = +blk.dataset.i, c = ovl[i];
+  osel = { o: c.o, a: c.a };
+  strip.querySelectorAll('.blk').forEach((b) => b.classList.toggle('sel', b === blk));
+  odrag = { i, items0: asItems(), edge: edgeAt(blk, e.clientX), x0: e.clientX, perPx: vr().len / strip.getBoundingClientRect().width, moved: false, saved: false };
+  updateUI();
+};
+$('ostrip').onpointermove = (e) => {
+  const d = odrag, strip = $('ostrip');
+  if (!d) { const blk = e.target.closest?.('.blk'); strip.style.cursor = blk && edgeAt(blk, e.clientX) ? 'col-resize' : ''; return; }
+  const dx = (e.clientX - d.x0) * d.perPx, c0 = d.items0[d.i];
+  if (!d.moved && Math.abs(e.clientX - d.x0) < 4) return;
+  d.moved = true;
+  if (!d.saved) { checkpoint(); d.saved = true; }
+  const items = d.items0.map((c) => ({ ...c })), c = items[d.i];
+  if (d.edge === 'r') c.b = Math.max(c0.a + 0.1, Math.min(osources[c0.o].dur, c0.b + dx * c0.r));
+  else if (d.edge === 'l') { c.a = Math.max(0, Math.min(c0.b - 0.1, c0.a + dx * c0.r)); c.at = c0.at + (c.a - c0.a) / c0.r; osel = { o: c.o, a: c.a }; }
+  else { // moving: edges cling to the main clips, voice pieces, other overlay clips and the start
+    let at = Math.max(0, c0.at + dx), snapAt = null, best = null;
+    const len = olen(c0), tol = 10 * d.perPx;
+    const marks = [0, ...segs().flatMap((g) => [g.e0, g.e0 + (g.b - g.a) / g.r]), ...pieces().flatMap((q) => [q.s, q.e]), ...d.items0.filter((_, j) => j !== d.i).flatMap((o) => [o.at, o.at + olen(o)])];
+    for (const edge of [at, at + len]) for (const q of marks) { const gap = Math.abs(q - edge); if (gap < tol && (!best || gap < best.gap)) best = { gap, adj: q - edge, q }; }
+    if (best) { at = Math.max(0, at + best.adj); snapAt = best.q; }
+    c.at = at; d.newAt = at;
+    const blk = strip.querySelector(`[data-i="${d.i}"]`);
+    blk.classList.add('dragging'); blk.style.left = pctE(at) + '%';
+    strip.querySelector('.drop')?.remove();
+    if (snapAt !== null) { const line = Object.assign(document.createElement('div'), { className: 'drop' }); line.style.left = pctE(snapAt) + '%'; strip.append(line); }
+    d.items = items;
+    return;
+  }
+  d.items = items; olayout(items); renderCuts(); touched();
+};
+$('ostrip').onpointerup = $('ostrip').onpointercancel = (e) => {
+  const d = odrag, strip = $('ostrip'); odrag = null;
+  if (!d) return;
+  strip.querySelector('.drop')?.remove();
+  if (!d.moved) { seekTo(toSrc(eAtX(e.clientX, strip))); return; }
+  if (!d.edge && d.items) { olayout(d.items); osel = { o: d.items[d.i].o, a: d.items[d.i].a }; status(`Moved the overlay to ${fmt(d.items[d.i].at)}.`); }
+  commitEdit();
+};
+
+// the overlay window in the player: a third video that follows the timeline
+const ov = $('ovideo');
+function overlayFrame() { // the part of the player the picture fills, in pixels
+  const W = wrap.clientWidth, H = wrap.clientHeight, r = pictureRect();
+  return $('shape').value === 'original' && r ? { x: r.ox, y: r.oy, w: r.pw, h: r.ph } : { x: 0, y: 0, w: W, h: H };
+}
+function placeOverlay() {
+  const F = overlayFrame(), size = +$('ovSize').value / 100, vw = ov.videoWidth || 16, vh = ov.videoHeight || 9;
+  let w = F.w * size, h = (w * vh) / vw, x, y;
+  if (size >= 0.99) { const k = Math.min(F.w / vw, F.h / vh); w = vw * k; h = vh * k; x = F.x + (F.w - w) / 2; y = F.y + (F.h - h) / 2; }
+  else {
+    const m = F.w * 0.03, pos = $('ovPos').value;
+    x = pos.includes('l') ? F.x + m : pos === 'c' ? F.x + (F.w - w) / 2 : F.x + F.w - w - m;
+    y = pos.includes('t') ? F.y + m : pos === 'c' ? F.y + (F.h - h) / 2 : F.y + F.h - h - m;
+  }
+  Object.assign(ov.style, { width: w + 'px', height: h + 'px', left: x + 'px', top: y + 'px' });
+}
+function syncOverlay() {
+  const e = toEdit(gNow()), c = voiceFree && ovl.length ? ovl.find((x) => e >= x.at && e < x.at + olen(x)) : null;
+  if (!c) { if (!ov.hidden) { ov.pause(); ov.hidden = true; } return; }
+  const src = osources[c.o]?.url;
+  if (!src) return;
+  if (ov.dataset.o !== String(c.o)) { ov.dataset.o = String(c.o); ov.src = src; }
+  ov.hidden = false; placeOverlay();
+  const playing = state.playing || (state.recording && !state.recPaused), want = c.a + (e - c.at) * c.r;
+  if (Math.abs(ov.currentTime - want) > (playing ? 0.3 : 0.03)) ov.currentTime = want;
+  ov.playbackRate = Math.min(16, (+$('rate').value || 1) * c.r);
+  if (playing && ov.paused) ov.play().catch(() => {}); else if (!playing && !ov.paused) ov.pause();
+}
+for (const id of ['ovSize', 'ovPos']) $(id).addEventListener('change', () => { if (!ov.hidden) placeOverlay(); touched(); });
+
 // dragging a clip: shows where it would land
 function moveHint(e) {
   const x = eAtX(e.clientX, strip);
@@ -1095,7 +1241,7 @@ $('musicFile').onchange = (e) => { if (e.target.files[0]) loadMusic(e.target.fil
 $('musicOff').onclick = () => { music = null; kv.del('music'); $('musicName').textContent = ''; $('musicOpts').hidden = true; touched(); updateUI(); };
 
 // ---------- picture & text settings ----------
-const fxIds = ['denoise', 'norm', 'eq', 'deess', 'fade', 'mvol', 'duck', 'shape', 'crop', 'caps', 'introText', 'introSec', 'outroText', 'outroSec'];
+const fxIds = ['denoise', 'norm', 'eq', 'deess', 'fade', 'mvol', 'duck', 'shape', 'crop', 'caps', 'introText', 'introSec', 'outroText', 'outroSec', 'ovSize', 'ovPos'];
 function applyShape() {
   const sh = $('shape').value;
   wrap.classList.toggle('shape-vertical', sh === 'vertical');
@@ -1380,7 +1526,7 @@ function tick() {
     const want = Math.min(16, (+$('rate').value || 1) * speedAt(t));
     if (Math.abs(video.playbackRate - want) > 1e-3) video.playbackRate = want;
   }
-  updateClip();
+  updateClip(); syncOverlay();
   applyZoomPreview(t); placeDots();
   if ($('caps').checked) {
     const c = captionList().find((x) => t >= x.t0 && t < x.t1);
@@ -1939,7 +2085,7 @@ $('export').onclick = async () => {
       try {
         status('Exporting on this device…');
         const fx = { shape, crop: $('crop').value / 100, captions, intro, outro, zooms };
-        const r = await exportLocally({ sources: sources.map((x) => ({ file: x.file, off: x.off, blank: !!x.blank })), voice: finalAudio(true), segs: segs().map((g) => ({ src: g.src, a: g.a - sources[g.src].off, b: g.b - sources[g.src].off, r: g.r })), fx, saveHandle: handle, onProgress: (p) => (btn.textContent = `Exporting ${Math.round(p * 100)}%`) });
+        const r = await exportLocally({ sources: sources.map((x) => ({ file: x.file, off: x.off, blank: !!x.blank })), voice: finalAudio(true), overlay: ovl.length ? { clips: ovl.map((c) => ({ file: osources[c.o].file, a: c.a, b: c.b, at: c.at })), size: +$('ovSize').value / 100, pos: $('ovPos').value } : null, segs: segs().map((g) => ({ src: g.src, a: g.a - sources[g.src].off, b: g.b - sources[g.src].off, r: g.r })), fx, saveHandle: handle, onProgress: (p) => (btn.textContent = `Exporting ${Math.round(p * 100)}%`) });
         blob = r.blob; local = true;
         if (r.audioCodec !== 'aac') note = ' This browser cannot make AAC audio, so the voice is Opus. Most players handle it, but QuickTime and some older devices may not.';
       } catch (e) {
@@ -2000,12 +2146,13 @@ updateUI();
     for (const m of meta) { if (m.blank) { sources.push({ id: m.id, name: m.name, blank: true, dur: m.dur, off: total() }); continue; } const rec = m.file ? { file: m.file } : await kv.get('src-' + m.id); if (rec?.file) await addSource(rec.file, m.id); }
   } catch { return status('This browser cannot play the saved video any more. Upload it again.'); }
   if (!sources.length) return;
+  try { for (const m of (await kv.get('osources')) || []) { const rec = await kv.get('osrc-' + m.id); if (rec?.file) { const { dur, url } = await probe(rec.file); osources.push({ id: m.id, name: m.name, file: rec.file, url, dur }); } } } catch {}
   if (legacy) { kv.set('src-' + sources[0].id, { file: sources[0].file }); saveSources(); kv.del('video'); }
   clips = sources.filter((x) => !x.blank).map((x) => ({ a: x.off, b: x.off + x.dur, r: 1 }));
   let usedSaved = false;
   try { // the saved edit counts only if it still fits the videos
     const e = JSON.parse(localStorage.getItem('project') || 'null');
-    if (e && Math.abs(e.total - total()) < 0.05 && Array.isArray(e.clips) && e.clips.every((c) => c.b > c.a && c.a >= 0 && c.b <= total() + 0.01)) { usedSaved = true; clips = e.clips; zooms = (e.zooms || []).filter((z) => z.b > z.a); voiceFree = !!e.voiceFree; vsp = Array.isArray(e.vsp) ? e.vsp : []; syncMode(); }
+    if (e && Math.abs(e.total - total()) < 0.05 && Array.isArray(e.clips) && e.clips.every((c) => c.b > c.a && c.a >= 0 && c.b <= total() + 0.01)) { usedSaved = true; ovl = (e.ovl || []).filter((c) => osources[c.o]); clips = e.clips; zooms = (e.zooms || []).filter((z) => z.b > z.a); voiceFree = !!e.voiceFree; vsp = Array.isArray(e.vsp) ? e.vsp : []; syncMode(); }
   } catch {}
   if (!usedSaved) sources = sources.filter((x) => !x.blank);
   const take = await kv.get('take');
