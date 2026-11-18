@@ -64,6 +64,7 @@
       <canvas id="wave"></canvas>
       <div class="alane" id="alane" hidden></div>
       <div class="marks" id="marks"></div>
+      <div class="rline" id="rline" hidden></div>
       <div class="cuts" id="cuts"></div>
       <div class="playhead" id="playhead"><b></b></div>
       </div>
@@ -76,7 +77,7 @@
       <span class="sep"></span>
       <span id="selTag" class="seltag" title="The track the buttons act on. Click a clip or a track name to change it"></span>
       <button id="split" class="btn sm" title="Split at the playhead (B)" disabled>Split</button>
-      <button id="cut" class="btn sm" title="Cut out a part: press at the start, move, press again at the end (X)" disabled>✂ Cut</button>
+      <button id="cut" class="btn sm" title="Cut tool (X): click a track where you want to cut it. Click the video row for the video, the voice row for the voice. Click as many places as you like, then press Esc" disabled>✂ Cut</button>
       <button id="delClip" class="btn sm" title="Delete the selected clip (Delete)" disabled>Delete</button>
       <span class="gap"></span>
       <small class="sub" id="clipInfo"></small>
@@ -275,8 +276,8 @@
         <span><kbd>T</kbd> trim end</span><span><kbd>F</kbd> fullscreen</span>
         <span><kbd>↑</kbd><kbd>↓</kbd> scroll speed</span><span><kbd>←</kbd><kbd>→</kbd> seek 5s</span>
         <span><kbd>[</kbd><kbd>]</kbd> section back · next</span><span><kbd>M</kbd> next section starts now</span>
-        <span><kbd>S</kbd> retake this section</span><span><kbd>X</kbd> cut start · end</span>
-        <span><kbd>Esc</kbd> cancel a cut</span><span><kbd>B</kbd> split at playhead</span><span><kbd>+</kbd><kbd>−</kbd> zoom timeline · <kbd>0</kbd> fit</span><span><kbd>L</kbd> redo this line</span>
+        <span><kbd>S</kbd> retake this section</span><span><kbd>X</kbd> cut tool on · off</span>
+        <span><kbd>Esc</kbd> stop cutting</span><span><kbd>B</kbd> split at playhead</span><span><kbd>+</kbd><kbd>−</kbd> zoom timeline · <kbd>0</kbd> fit</span><span><kbd>L</kbd> redo this line</span>
         <span><kbd>Del</kbd> delete clip</span><span>Right-click a clip: menu</span><span><kbd>Ctrl</kbd><kbd>Z</kbd> undo · <kbd>Shift</kbd> redo</span>
       </div>
     </section>

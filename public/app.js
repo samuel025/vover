@@ -88,7 +88,7 @@ function updateUI() {
   $('pauses').title = voiceFree ? 'Tick "Link voice to video" to cut out pauses' : 'Cuts long silences out of the recording and the video';
   $('zoomAdd').disabled = !idle;
   $('srt').disabled = !v;
-  $('cut').textContent = cutStart === null ? '✂ Cut' : '✂ Cut ends here';
+  $('cut').classList.toggle('on', razor);
   $('clear').disabled = rec || !hasTake();
   $('expAudio').disabled = rec || !hasTake();
   $('export').disabled = rec || !(hasTake() || music) || gone;
@@ -312,18 +312,6 @@ function dropGaps() {
   clips = clips.filter((c) => !isBlankClip(c)); sources = sources.filter((x) => !x.blank);
   if (sources[loaded] !== was) loaded = -1;
   touched(); saveSources();
-}
-// takes [lo, hi] (timeline seconds) out of the clips that cover it and leaves the space
-function cutFree(lo, hi) {
-  const items = [];
-  for (const g of segs()) {
-    if (sources[g.src].blank) continue;
-    const e1 = g.e0 + (g.b - g.a) / g.r;
-    if (hi <= g.e0 || lo >= e1) { items.push({ c: { a: g.a, b: g.b, r: g.r }, at: g.e0 }); continue; }
-    if (lo > g.e0 + 0.01) items.push({ c: { a: g.a, b: g.a + (lo - g.e0) * g.r, r: g.r }, at: g.e0 });
-    if (hi < e1 - 0.01) items.push({ c: { a: g.a + (hi - g.e0) * g.r, b: g.b, r: g.r }, at: hi });
-  }
-  layout(items);
 }
 
 // ---------- timeline zoom ----------
@@ -639,14 +627,9 @@ function blankVoice(lo, hi) {
   setTakeSamples(out, rate);
   vsp = vsp.filter((t) => t < lo - 1e-4 || t > hi + 1e-4);
 }
-function voiceCut(lo, hi) {
-  if (!hasTake()) return status('There is no recording yet.');
-  checkpoint(); blankVoice(lo, hi); vsp = [...vsp, lo, hi].sort((a, b) => a - b); asel = null; afterVoiceEdit();
-  status(`Cut ${(hi - lo).toFixed(1)}s out of the voice. The space stays until you drag a piece over it, or move the playhead into it and record to fill it. Undo brings it back.`);
-}
 function voiceSplit(t) {
   const p = pieceAt(t);
-  if (!p || t - p.s < 0.1 || p.e - t < 0.1) return status('Move the playhead into the middle of a voice piece to split it.');
+  if (!p || t - p.s < 0.1 || p.e - t < 0.1) return status('Click inside a piece of the voice, away from its ends, to cut it.');
   checkpoint(); vsp = [...vsp, t].sort((a, b) => a - b); asel = null; afterVoiceEdit();
   status(`Split the voice at ${fmt(t)}. Click a piece, then drag it or press Delete.`);
 }
@@ -786,33 +769,55 @@ function spansForEdited(lo, hi) {
   }
   return out;
 }
-function cutPress() {
-  if (!canSeek()) return;
-  const t = gNow();
-  if (cutStart === null) { cutStart = t; renderCuts(); return status(`Cut starts at ${fmt(toEdit(t))}. Move to where it ends, then press Cut again.`); }
-  const e0 = toEdit(cutStart), e1 = toEdit(t), lo = Math.min(e0, e1), hi = Math.max(e0, e1);
-  if (hi - lo < 0.1) return status('Move the playhead away from the start point first.');
-  cutStart = null;
-  if (voiceFree && selTrack === 'overlay') { renderCuts(); return cutOverlay(lo, hi); }
-  if (onVoice()) { renderCuts(); return voiceCut(lo, hi); }
-  checkpoint();
-  if (voiceFree) cutFree(lo, hi); else for (const [a, b] of spansForEdited(lo, hi)) removeSpan(a, b);
-  commitEdit();
-  seekTo(toSrc(lo));
-  status(`Removed ${(hi - lo).toFixed(1)}s of video. It is skipped in playback and left out of the export.${voiceFree ? '' : ' The voice under it was removed too, so the rest moved up. To cut only the voice and keep the space, set Edits change to "voice only" and undo (Ctrl+Z) first.'}${overrunNote()}`);
-}
-function cancelCut() { if (cutStart !== null) { cutStart = null; renderCuts(); status('Cut cancelled.'); } }
-$('cut').onclick = cutPress;
 
+// cuts the main video at timeline time e
+function splitVideoAt(e) {
+  const list = segs(), k = list.findIndex((g) => e > g.e0 + 0.05 && e < g.e0 + (g.b - g.a) / g.r - 0.05);
+  if (k < 0) return status('Click inside a video clip to cut it there.');
+  const c = clips[k], g = list[k].a + (e - list[k].e0) * list[k].r;
+  checkpoint(); clips.splice(k, 1, { ...c, b: g }, { ...c, a: g }); commitEdit();
+  status(`Cut the video at ${fmt(e)}. Click a part and press Delete to remove it, or drag it to move it.`);
+}
 function splitHere() {
   if (!canSeek()) return;
-  if (voiceFree && selTrack === 'overlay') return splitOverlay(toEdit(gNow()));
-  if (onVoice()) return voiceSplit(toEdit(gNow()));
-  const g = gNow(), k = clipIndexAt(g), c = clips[k];
-  if (!c || g - c.a < 0.15 || c.b - g < 0.15) return status('Move the playhead into the middle of a clip to split it.');
-  checkpoint(); clips.splice(k, 1, { ...c, b: g }, { ...c, a: g }); commitEdit();
-  status(`Split at ${fmt(toEdit(g))}. Click a clip, then press Delete to remove it, or drag it to move it.`);
+  const e = toEdit(gNow());
+  if (voiceFree && selTrack === 'overlay') return splitOverlay(e);
+  if (onVoice()) return voiceSplit(e);
+  splitVideoAt(e);
 }
+
+// The Cut tool: while it is on, a click on a track cuts that track right where you click, as many times as you like.
+// Click the video row to cut the video, the voice row to cut the voice, the overlay row to cut the overlay.
+let razor = false;
+function setRazor(on) {
+  if (on && !canSeek()) return;
+  razor = on;
+  $('tbody').classList.toggle('razor', on);
+  $('rline').hidden = true;
+  updateUI();
+  if (on) status('Cut tool on: click the video, voice or overlay row where you want to cut. Click Cut again or press Esc to stop.');
+}
+const toggleRazor = () => setRazor(!razor);
+$('cut').onclick = toggleRazor;
+const razorLine = (e) => { // a guide that follows the mouse along the row it would cut
+  const r = $('tbody').getBoundingClientRect(), y = e.clientY - r.top, line = $('rline');
+  let track = y < 30 ? 'overlay' : y < 60 ? 'video' : 'voice';
+  if (track === 'voice' && !voiceFree) track = 'video';
+  const top = track === 'overlay' ? 0 : track === 'video' ? 30 : 60, h = track === 'voice' ? r.height - 60 - 14 : 30;
+  Object.assign(line.style, { left: e.clientX - r.left + 'px', top: top + 'px', height: h + 'px' });
+  line.hidden = false;
+};
+timeline.addEventListener('pointermove', (e) => { if (razor) razorLine(e); });
+timeline.addEventListener('pointerleave', () => { $('rline').hidden = true; });
+timeline.addEventListener('pointerdown', (e) => {
+  if (!razor || e.button) return;
+  e.stopPropagation(); e.preventDefault(); // the click cuts; it does not drag, select or move the playhead
+  if (!canSeek()) return;
+  let track = trackAtY(e.clientY);
+  if (track === 'voice' && !voiceFree) track = 'video';
+  const t = eAtX(e.clientX);
+  if (track === 'overlay') splitOverlay(t); else if (track === 'voice') voiceSplit(t); else splitVideoAt(t);
+}, true);
 function deleteClip() {
   if (!canSeek()) return;
   if (voiceFree && selTrack === 'overlay') return deleteOverlay();
@@ -1079,7 +1084,7 @@ async function addOverlay(file) {
 $('ovFile').onchange = (e) => { addOverlay(e.target.files[0]); e.target.value = ''; };
 function splitOverlay(e) {
   const k = ovl.findIndex((c) => e > c.at + 0.15 && e < c.at + olen(c) - 0.15);
-  if (k < 0) return status('Move the playhead into the middle of the overlay clip to split it.');
+  if (k < 0) return status('Click inside an overlay clip, away from its ends, to cut it.');
   const c = ovl[k], m = c.a + (e - c.at) * c.r, items = asItems();
   checkpoint(); items.splice(k, 1, { ...c, b: m }, { ...c, a: m, at: e });
   olayout(items); osel = { o: c.o, a: m }; commitEdit();
@@ -1090,17 +1095,6 @@ function deleteOverlay() {
   if (k < 0) return status('Click an overlay clip first.');
   checkpoint(); olayout(asItems().filter((_, j) => j !== k)); osel = null; commitEdit();
   status('Deleted the overlay clip. The main video is untouched.');
-}
-function cutOverlay(lo, hi) {
-  const items = [];
-  for (const c of ovl) {
-    const e1 = c.at + olen(c);
-    if (hi <= c.at || lo >= e1) { items.push({ ...c }); continue; }
-    if (lo > c.at + 0.01) items.push({ ...c, b: c.a + (lo - c.at) * c.r });
-    if (hi < e1 - 0.01) items.push({ ...c, a: c.a + (hi - c.at) * c.r, at: hi });
-  }
-  checkpoint(); olayout(items); osel = null; commitEdit();
-  status(`Cut ${(hi - lo).toFixed(1)}s out of the overlay. The main video is untouched.`);
 }
 let odrag = null;
 $('ostrip').onpointerdown = (e) => {
@@ -2294,14 +2288,14 @@ document.addEventListener('keydown', (e) => {
   if (e.code === 'Space') { e.preventDefault(); e.target.blur?.(); state.recording && !state.recPaused ? $('pauseRec').click() : togglePlay(); } // a focused button must not also react to the space bar
   else if (k === 'r') $('rec').click();
   else if (k === 't') $('trim').click();
-  else if (k === 'x') cutPress();
+  else if (k === 'x') toggleRazor();
   else if (k === 'l') redoLine();
   else if (k === 'b') splitHere();
   else if (k === '+' || k === '=') zoomBy(1.6);
   else if (k === '-' || k === '_') zoomBy(1 / 1.6);
   else if (k === '0') setView(0, 0);
   else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteClip(); }
-  else if (e.key === 'Escape') cancelCut();
+  else if (e.key === 'Escape') setRazor(false);
   else if (k === 'f') toggleFullscreen();
   else if (k === 'm') markNext();
   else if (k === 's') retakeSection(cur);
