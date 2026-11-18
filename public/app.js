@@ -13,7 +13,7 @@ let base = new Float32Array(0), chunks = [], chunkLen = 0, capturing = false;
 let spans = [], lastNow = -1, lastSec = -1;
 let speed = 1;
 let capStart = 0, draft = null;
-let cutStart = null, editVer = 0, history = [], future = [], music = null, musicId = 0, takes = [], playK = -1, voiceFree = true, selTrack = 'video', zooms = [], zsel = null, pick = null, zoomDirty = false, vsp = [], asel = null, osources = [], ovl = [], osel = null;
+let cutStart = null, editVer = 0, history = [], future = [], music = null, musicId = 0, takes = [], playK = -1, voiceFree = true, selTrack = 'video', zooms = [], zsel = null, pick = null, zoomDirty = false, asel = null, osources = [], ovl = [], osel = null;
 let cleaned = null, cleaning = null, finalCache = {}, abCache = null, lastClipKey = '', lastCap = null;
 
 const B = 1024; // samples per waveform bucket
@@ -49,7 +49,7 @@ const kv = {
 };
 // writing a long recording to storage copies all of it, so quick edits (undo, drags) share one write
 let takeTimer = 0;
-const writeTake = () => { clearTimeout(takeTimer); takeTimer = 0; return hasTake() ? kv.set('take', state.take) : kv.del('take'); };
+const writeTake = () => { clearTimeout(takeTimer); takeTimer = 0; return hasTake() ? kv.set('take', { samples: state.take.src, rate: state.take.rate, vc: state.take.vc }) : kv.del('take'); }; // the whole recording and which parts of it are shown
 const saveTake = () => { clearTimeout(takeTimer); takeTimer = setTimeout(writeTake, 700); };
 addEventListener('pagehide', () => { if (takeTimer) writeTake(); });
 document.addEventListener('visibilitychange', () => { if (document.hidden && takeTimer) writeTake(); });
@@ -395,7 +395,7 @@ $('tscroll').onpointerup = $('tscroll').onpointercancel = () => { barDrag = null
 
 function newProject() {
   discardTake();
-  view = { s: 0, len: 0 }; voiceFree = true; vsp = []; asel = null; ovl = []; osources = []; osel = null; syncMode(); sources = []; clips = []; zooms = []; zsel = null; pick = null; loaded = -1; takes = []; cutStart = null; history = []; future = []; touched();
+  view = { s: 0, len: 0 }; voiceFree = true; asel = null; ovl = []; osources = []; osel = null; syncMode(); sources = []; clips = []; zooms = []; zsel = null; pick = null; loaded = -1; takes = []; cutStart = null; history = []; future = []; touched();
   try { localStorage.removeItem('project'); localStorage.removeItem('marks'); } catch {}
   kv.get('sources').then((m) => { for (const x of m || []) kv.del('src-' + x.id); kv.del('video'); }).then(() => kv.get('osources')).then((m) => { for (const x of m || []) kv.del('osrc-' + x.id); kv.del('osources'); }).then(() => kv.del('takes'));
 }
@@ -406,7 +406,7 @@ async function addSource(file, id) {
   return s;
 }
 const saveSources = () => kv.set('sources', sources.map(({ id, name, dur, blank }) => ({ id, name, dur, blank })));
-function saveProject() { try { localStorage.setItem('project', JSON.stringify({ total: total(), clips, zooms, voiceFree, vsp, ovl })); } catch {} }
+function saveProject() { try { localStorage.setItem('project', JSON.stringify({ total: total(), clips, zooms, voiceFree, ovl })); } catch {} }
 
 async function showProject(msg) {
   state.file = sources[0]?.file || null;
@@ -488,12 +488,12 @@ async function saveWorkspace() {
     const add = (name, blob, extra = {}) => { parts.push({ name, len: blob.size, ...extra }); blobs.push(blob); };
     for (const x of sources) if (!x.blank) add('src:' + x.id, x.file, { type: x.file.type, fname: x.file.name });
     for (const x of osources) add('osrc:' + x.id, x.file, { type: x.file.type, fname: x.file.name });
-    if (hasTake()) add('take', new Blob([state.take.samples]));
+    if (hasTake()) add('take', new Blob([state.take.src]));
     for (const t of takes) add('take:' + t.id, new Blob([t.samples]));
     const mus = await kv.get('music');
     if (mus?.file) add('music', mus.file, { type: mus.file.type, fname: mus.file.name });
     const head = {
-      v: 1, sources: sources.map(({ id, name, dur, blank }) => ({ id, name, dur, blank })), project: JSON.stringify({ total: total(), clips, zooms, voiceFree, vsp, ovl }), osources: osources.map(({ id, name, dur }) => ({ id, name, dur })),
+      v: 1, sources: sources.map(({ id, name, dur, blank }) => ({ id, name, dur, blank })), project: JSON.stringify({ total: total(), clips, zooms, voiceFree, ovl }), takeVc: state.take?.vc, osources: osources.map(({ id, name, dur }) => ({ id, name, dur })),
       script: scriptEl.value, marks: lsGet('marks'), fx: lsGet('fx'), takeRate: state.take?.rate, takeCounter,
       takes: takes.map(({ id, name, stars, at, rate, free }) => ({ id, name, stars, at, rate, free })), parts,
     };
@@ -526,7 +526,7 @@ async function openWorkspace(file) {
     for (const x of h.sources) if (!x.blank) await kv.set('src-' + x.id, { file: fileOf(blobs['src:' + x.id]) });
     await kv.set('osources', h.osources || []);
     for (const x of h.osources || []) await kv.set('osrc-' + x.id, { file: fileOf(blobs['osrc:' + x.id]) });
-    if (blobs.take) await kv.set('take', { samples: new Float32Array(await blobs.take.blob.arrayBuffer()), rate: h.takeRate });
+    if (blobs.take) await kv.set('take', { samples: new Float32Array(await blobs.take.blob.arrayBuffer()), rate: h.takeRate, vc: h.takeVc });
     for (const t of h.takes || []) if (blobs['take:' + t.id]) await kv.set('take-' + t.id, { samples: new Float32Array(await blobs['take:' + t.id].blob.arrayBuffer()) });
     await kv.set('takes', { n: h.takeCounter || 0, list: h.takes || [] });
     if (blobs.music) await kv.set('music', { file: fileOf(blobs.music) });
@@ -540,12 +540,12 @@ $('openWs').onchange = (e) => { openWorkspace(e.target.files[0]); e.target.value
 $('addFile').onchange = (e) => { addVideo(e.target.files[0]); e.target.value = ''; };
 
 // undo / redo: a snapshot is the clips, the videos and the recorded voice (the voice arrays are never changed in place, so keeping them is cheap)
-const snap = () => ({ clips: JSON.stringify(clips), zooms: JSON.stringify(zooms), voiceFree, vsp: vsp.slice(), sources: sources.slice(), ovl: JSON.stringify(ovl), osources: osources.slice(), take: state.take ? { samples: state.take.samples, rate: state.take.rate } : null });
+const snap = () => ({ clips: JSON.stringify(clips), zooms: JSON.stringify(zooms), voiceFree, sources: sources.slice(), ovl: JSON.stringify(ovl), osources: osources.slice(), take: state.take }); // take objects are replaced, never changed, so keeping the reference is enough
 function checkpoint() { history.push(snap()); if (history.length > 15) history.shift(); future = []; updateUI(); }
 function applySnap(sn) {
   const keepE = sources.length && loaded >= 0 ? toEdit(gNow()) : 0, was = sources[loaded];
   const sameTake = (state.take?.samples || null) === (sn.take?.samples || null), sameSources = sources.length === sn.sources.length && sources.every((x, i) => x === sn.sources[i]);
-  clips = JSON.parse(sn.clips); zooms = JSON.parse(sn.zooms); voiceFree = !!sn.voiceFree; vsp = (sn.vsp || []).slice(); asel = null; ovl = JSON.parse(sn.ovl || '[]'); osources = (sn.osources || []).slice(); osel = null; syncMode(); zsel = null; pick = null; sources = sn.sources.slice(); cutStart = null;
+  clips = JSON.parse(sn.clips); zooms = JSON.parse(sn.zooms); voiceFree = !!sn.voiceFree; asel = null; ovl = JSON.parse(sn.ovl || '[]'); osources = (sn.osources || []).slice(); osel = null; syncMode(); zsel = null; pick = null; sources = sn.sources.slice(); cutStart = null;
   if (loaded >= sources.length || sources[loaded] !== was) loaded = -1;
   state.take = sn.take ? { ...sn.take } : null; mixCache = null;
   if (!sameTake) rebuildPeaks(state.take?.samples || new Float32Array(0));
@@ -578,7 +578,7 @@ const vInv = (t) => (voiceFree ? toSrc(t) : t);
 const voiceSec = () => (hasTake() ? state.take.samples.length / state.take.rate : 0);
 const overrunNote = () => ''; // the video now runs on to the end of the voice, so nothing is left out
 function setTakeSamples(samples, rate) {
-  state.take = { samples, rate }; state.attempts = {}; saveAttempts(); mixCache = null;
+  state.take = takeFrom(samples, rate); state.attempts = {}; saveAttempts(); mixCache = null;
   rebuildPeaks(samples); saveTake(); touched();
 }
 // video and voice -> video only: the voice is re-laid onto the edited timeline, so it sounds exactly the same right now
@@ -623,65 +623,81 @@ $('linkVoice').onchange = (e) => {
   status(free ? 'Voice and video are separate. Deleting or cutting video leaves your voice where it is.' : 'Voice linked to video. Cutting or deleting video also removes the voice under it. Your voice was moved back to match the video.');
 };
 
-// ---------- editing only the voice ----------
-// The voice is a stretch of samples; the pieces are the parts of it that have sound, separated by silence or by a split.
-// Cutting or deleting a piece blanks it, so the space stays; dragging a piece moves its samples, and it clings to nearby edges.
-let pieceCache = null;
-function pieces() {
-  if (!hasTake()) return [];
-  const { samples, rate } = state.take, key = vsp.join(',');
-  if (pieceCache?.ref === samples && pieceCache.key === key) return pieceCache.list;
-  const min = Math.round(rate * 0.03), spans = [], n = samples.length;
-  let from = -1, last = -1;
-  for (let i = 0; i < n; i++) {
-    if (samples[i] !== 0) { if (from < 0) from = i; last = i; }
-    else if (from >= 0 && i - last > min) { spans.push([from, last + 1]); from = -1; }
+// ---------- the voice as clips ----------
+// The recording is kept whole in take.src. What is heard is take.vc, a list of clips that each show a stretch of it at a place on the
+// timeline, and take.samples is those clips laid out. Cutting, deleting, moving and trimming only change the list, so the edge of a clip
+// can always be pulled out again to bring back the audio behind it. The lists are never changed in place, only replaced.
+const takeFrom = (samples, rate) => ({ samples, rate, src: samples, vc: [{ a: 0, b: samples.length / rate, at: 0 }] });
+const clipLen = (c) => c.b - c.a;
+function compose(src, vc, rate) {
+  if (vc.length === 1 && vc[0].a === 0 && vc[0].at === 0 && Math.round(vc[0].b * rate) >= src.length) return src; // untouched: the recording itself
+  const out = new Float32Array(Math.round(vc.reduce((m, c) => Math.max(m, c.at + clipLen(c)), 0) * rate));
+  for (const c of vc) {
+    const a = Math.round(c.a * rate), n = Math.min(Math.round(clipLen(c) * rate), src.length - a, out.length - Math.round(c.at * rate));
+    if (n > 0) out.set(src.subarray(a, a + n), Math.round(c.at * rate));
   }
-  if (from >= 0) spans.push([from, last + 1]);
-  const cuts = vsp.map((t) => Math.round(t * rate)), list = [], tiny = Math.round(rate * 0.02);
-  for (const [a, b] of spans) {
-    let lo = a;
-    for (const c of cuts.filter((c) => c > a + tiny && c < b - tiny)) { list.push({ s: lo / rate, e: c / rate }); lo = c; }
-    list.push({ s: lo / rate, e: b / rate });
-  }
-  pieceCache = { ref: samples, key, list };
-  return list;
+  return out;
 }
+// shows these clips from now on (a clip that lands on others covers them)
+function setVoiceClips(vc) {
+  const t = state.take, list = vc.filter((c) => clipLen(c) > 0.01).sort((x, y) => x.at - y.at);
+  state.take = { ...t, vc: list, samples: compose(t.src, list, t.rate) };
+  mixCache = null; rebuildPeaks(state.take.samples); saveTake(); touched();
+}
+// the clips with `me` laid on top: whatever it covers is trimmed away or split around it
+function layOn(vc, me) {
+  const lo = me.at, hi = me.at + clipLen(me), out = [me];
+  for (const c of vc) {
+    const s = c.at, e = c.at + clipLen(c);
+    if (e <= lo + 1e-6 || s >= hi - 1e-6) { out.push(c); continue; }
+    if (s < lo - 0.01) out.push({ a: c.a, b: c.a + (lo - s), at: s });
+    if (e > hi + 0.01) out.push({ a: c.a + (hi - s), b: c.b, at: hi });
+  }
+  return out;
+}
+// new audio recorded or restored at startSample goes into the recording and onto the timeline over whatever was there
+function withAudio(take, piece, startSample, rate) {
+  const src = take ? concat([take.src, piece]) : piece, from = take ? take.src.length : 0;
+  const me = { a: from / rate, b: (from + piece.length) / rate, at: startSample / rate };
+  const vc = layOn(take ? take.vc : [], me).filter((c) => clipLen(c) > 0.01).sort((x, y) => x.at - y.at);
+  return { samples: compose(src, vc, rate), rate, src, vc };
+}
+const pieces = () => (hasTake() ? state.take.vc.map((c, i) => ({ s: c.at, e: c.at + clipLen(c), i })) : []);
 const pieceAt = (t) => pieces().find((p) => t >= p.s && t < p.e);
 const chosenPiece = () => (asel && pieces().find((p) => Math.abs(p.s - asel.s) < 0.02)) || pieceAt(toEdit(gNow()));
 function afterVoiceEdit() { saveProject(); drawWave(); updateUI(); }
-function blankVoice(lo, hi) {
-  const { samples, rate } = state.take, out = samples.slice();
-  out.fill(0, Math.max(0, Math.round(lo * rate)), Math.min(out.length, Math.round(hi * rate)));
-  setTakeSamples(out, rate);
-  vsp = vsp.filter((t) => t < lo - 1e-4 || t > hi + 1e-4);
-}
 function voiceSplit(t) {
-  const p = pieceAt(t);
-  if (!p || t - p.s < 0.1 || p.e - t < 0.1) return status('Click inside a piece of the voice, away from its ends, to cut it.');
-  checkpoint(); vsp = [...vsp, t].sort((a, b) => a - b); asel = null; afterVoiceEdit();
-  status(`Split the voice at ${fmt(t)}. Click a piece, then drag it or press Delete.`);
+  const vc = hasTake() ? state.take.vc.slice() : [], k = vc.findIndex((c) => t > c.at + 0.1 && t < c.at + clipLen(c) - 0.1);
+  if (k < 0) return status('Click inside a piece of the voice, away from its ends, to cut it.');
+  checkpoint();
+  const c = vc[k], m = c.a + (t - c.at);
+  vc.splice(k, 1, { ...c, b: m }, { a: m, b: c.b, at: t });
+  state.take = { ...state.take, vc }; // the same sound in two pieces
+  saveTake(); asel = null; afterVoiceEdit();
+  status(`Cut the voice at ${fmt(t)}. Click a piece, then drag it or press Delete.`);
 }
 function voiceDelete() {
   const p = chosenPiece();
   if (!p) return status('Click a piece of the voice first, or put the playhead on one.');
-  checkpoint(); blankVoice(p.s, p.e); asel = null; afterVoiceEdit();
+  checkpoint(); setVoiceClips(state.take.vc.filter((_, i) => i !== p.i)); asel = null; afterVoiceEdit();
   status(`Deleted ${(p.e - p.s).toFixed(1)}s of voice and left the space. Undo brings it back.`);
 }
 function voiceMove(p, d) {
-  const { samples, rate } = state.take, a = Math.round(p.s * rate), b = Math.round(p.e * rate), to = Math.max(0, a + Math.round(d * rate));
-  const out = new Float32Array(Math.max(samples.length, to + (b - a))), piece = samples.slice(a, b);
-  out.set(samples); out.fill(0, a, b); out.set(piece, to);
-  setTakeSamples(out, rate);
-  const dd = (to - a) / rate, to0 = p.s + dd, to1 = p.e + dd;
-  const inside = vsp.filter((t) => t > p.s + 1e-4 && t < p.e - 1e-4).map((t) => t + dd);
-  const outside = vsp.filter((t) => !(t >= p.s - 1e-4 && t <= p.e + 1e-4) && !(t > to0 && t < to1));
-  vsp = [...outside, ...inside, to0, to1].sort((x, y) => x - y).filter((t, i, l) => !i || t - l[i - 1] > 1e-4);
-  asel = { s: to0, e: to1 };
+  const me = { ...state.take.vc[p.i], at: Math.max(0, p.s + d) };
+  setVoiceClips(layOn(state.take.vc.filter((_, i) => i !== p.i), me));
+  asel = { s: me.at, e: me.at + clipLen(me) };
+}
+// the clips with an edge of clip i pulled by dt seconds: it can reach back into the recording, but not onto its neighbours or past the ends
+function voiceTrim(i, edge, dt) {
+  const vc = state.take.vc.map((c) => ({ ...c })), c = vc[i], len = state.take.src.length / state.take.rate;
+  const prevEnd = i > 0 ? vc[i - 1].at + clipLen(vc[i - 1]) : 0, nextAt = i + 1 < vc.length ? vc[i + 1].at : Infinity;
+  if (edge === 'r') c.b = Math.max(c.a + 0.1, Math.min(c.b + dt, len, c.a + (nextAt - c.at)));
+  else { const na = Math.max(c.a - (c.at - prevEnd), 0, Math.min(c.b - 0.1, c.a + dt)); c.at += na - c.a; c.a = na; }
+  return vc;
 }
 // where a piece being dragged by d lands: its edges cling to the edges of other pieces, the start of the recording and the end of the video
 function magnet(p, d, tol) {
-  const marks = [0, editedLen(), ...pieces().filter((o) => Math.abs(o.s - p.s) > 1e-6).flatMap((o) => [o.s, o.e])];
+  const marks = [0, editedLen(), ...pieces().filter((o) => o.i !== p.i).flatMap((o) => [o.s, o.e])];
   d = Math.max(-p.s, d);
   let best = null;
   for (const edge of [p.s + d, p.e + d]) for (const q of marks) {
@@ -699,7 +715,7 @@ function renderPieces() {
   const v = vr();
   lane.innerHTML = pieces().map((p, i) => {
     const sel = asel && Math.abs(p.s - asel.s) < 0.02;
-    return `<div class="ablk${sel ? ' sel' : ''}" data-i="${i}" style="left:${pctE(p.s)}%;width:${((p.e - p.s) / v.len) * 100}%" title="Drag to move, Delete to remove"></div>`;
+    return `<div class="ablk${sel ? ' sel' : ''}" data-i="${i}" style="left:${pctE(p.s)}%;width:${((p.e - p.s) / v.len) * 100}%" title="Drag to move, drag an edge to trim, Delete to remove"></div>`;
   }).join('');
 }
 $('alane').onpointerdown = (e) => {
@@ -709,7 +725,7 @@ $('alane').onpointerdown = (e) => {
   const p = pieces()[+el.dataset.i];
   asel = { s: p.s, e: p.e }; setTrack('voice'); showEdit();
   lane.querySelectorAll('.ablk').forEach((b) => b.classList.toggle('sel', b === el));
-  adrag = { p, el, i: +el.dataset.i, s0: vr().s, x0: e.clientX, perPx: vr().len / lane.getBoundingClientRect().width, d: 0, moved: false };
+  adrag = { p, el, i: +el.dataset.i, s0: vr().s, edge: edgeAt(el, e.clientX), x0: e.clientX, perPx: vr().len / lane.getBoundingClientRect().width, d: 0, moved: false };
   addEventListener('pointermove', amove); addEventListener('pointerup', aup); addEventListener('pointercancel', aup);
 };
 function amove(e) {
@@ -720,6 +736,12 @@ function amove(e) {
   if (!adrag.moved && Math.abs(dx) < 4) return;
   adrag.moved = true;
   if (!edge) edgeStart(amove);
+  if (adrag.edge) { // trimming: show the clip with its edge pulled; it is applied when you let go
+    const vc = voiceTrim(adrag.p.i, adrag.edge, dx * adrag.perPx + (vr().s - adrag.s0)), c = vc[adrag.p.i], el = lane.querySelector(`[data-i="${adrag.i}"]`);
+    adrag.vc = vc; adrag.d = 1;
+    el.classList.add('dragging'); el.style.left = pctE(c.at) + '%'; el.style.width = (clipLen(c) / vr().len) * 100 + '%';
+    return;
+  }
   const m = magnet(adrag.p, dx * adrag.perPx + (vr().s - adrag.s0), 10 * adrag.perPx);
   m.d = Math.min(m.d, 3600 - adrag.p.e); // a recording is kept in memory, so there is a limit of an hour
   adrag.d = m.d;
@@ -736,8 +758,10 @@ function aup(e) {
   if (!d) return;
   lane.querySelector('.drop')?.remove();
   if (!d.moved || Math.abs(d.d) < 1e-3) { if (!d.moved) seekTo(toSrc(eAtX(e.clientX))); renderPieces(); return; }
-  checkpoint(); voiceMove(d.p, d.d); afterVoiceEdit();
-  status(`Moved the voice to ${fmt(asel.s)}.${overrunNote()}`);
+  checkpoint();
+  if (d.edge) { setVoiceClips(d.vc); asel = { s: d.vc[d.p.i].at, e: d.vc[d.p.i].at + clipLen(d.vc[d.p.i]) }; afterVoiceEdit(); return status('Trimmed the voice. Drag the edge back out to bring the rest of it back.'); }
+  voiceMove(d.p, d.d); afterVoiceEdit();
+  status(`Moved the voice to ${fmt(asel.s)}.`);
 }
 
 const SRC_TINT = ['', 's1', 's2', 's3'];
@@ -1841,22 +1865,6 @@ setInterval(() => {
 }, 150);
 
 // ---------- recording ----------
-// Puts freshly recorded pieces into the voice timeline. With an `end` it replaces only the span from `start` to `end` and keeps the rest;
-// with none it replaces everything after `start` (nothing records that way any more, the old draft format did).
-function splice(existing, start, end, pieces) {
-  const total = pieces.reduce((n, c) => n + c.length, 0);
-  const keepTail = end != null;
-  const writeLen = keepTail ? Math.max(0, Math.min(total, end - start)) : total;
-  const out = new Float32Array(keepTail ? Math.max(existing.length, start + writeLen) : start + writeLen);
-  out.set(keepTail ? existing : existing.subarray(0, Math.min(existing.length, start)));
-  let o = start, left = writeLen;
-  for (const c of pieces) {
-    if (left <= 0) break;
-    const part = c.length > left ? c.subarray(0, left) : c;
-    out.set(part, o); o += part.length; left -= part.length;
-  }
-  return out;
-}
 const rangeEndIdx = () => (state.range ? Math.round(vt(state.range.end) * ctx.sampleRate) : null);
 
 function beginCapture(quiet = false, at = null) {
@@ -1864,7 +1872,7 @@ function beginCapture(quiet = false, at = null) {
   video.playbackRate = 1; // the voice is recorded in real time, so the video must not run faster or slower
   capStart = Math.round((at ?? vt(gNow())) * ctx.sampleRate);
   const have = hasTake() ? state.take.samples : new Float32Array(0);
-  base = have; // splice() copies from it, the take itself is untouched until the capture is committed
+  base = have;
   const r = state.range;
   if (r && !('old' in r)) { // remember the audio this retake replaces, so it can be brought back
     const a = Math.round(vt(r.start) * ctx.sampleRate);
@@ -1883,10 +1891,11 @@ function commitCapture() {
   capturing = false;
   const r = state.range;
   if (r && !r.saved && chunkLen > 0 && hasEnergy(r.old)) { pushAttempt(r.sec, { start: r.oldStart, samples: r.old, rate: ctx.sampleRate }); r.saved = true; }
-  state.take = { samples: splice(base, capStart, state.range ? rangeEndIdx() : capStart + chunkLen, chunks), rate: ctx.sampleRate }; // only the recorded span is replaced; the rest of the voice is kept
+  const heard = concat(chunks), room = state.range ? rangeEndIdx() - capStart : heard.length; // a section retake keeps to its own section
+  if (heard.length && room > 0) state.take = withAudio(hasTake() ? state.take : null, heard.length > room ? heard.subarray(0, room) : heard, capStart, ctx.sampleRate); // the new audio goes in as a clip; the rest of the voice is kept
   mixCache = null;
   chunks = []; chunkLen = 0; base = new Float32Array(0);
-  rebuildPeaks(state.take.samples);
+  rebuildPeaks(state.take?.samples || new Float32Array(0));
   saveTake(); clearDraft();
   drawWave(); renderSections();
 }
@@ -1926,8 +1935,8 @@ async function checkDraft() {
   $('recoverYes').onclick = async () => {
     const pieces = [];
     for (let i = 0; i < m.parts; i++) { const p = await kv.get('draft-' + i); if (p) pieces.push(p); }
-    const existing = hasTake() ? state.take.samples : new Float32Array(0);
-    state.take = { samples: splice(existing, m.start, m.end ?? m.start + pieces.reduce((n, c) => n + c.length, 0), pieces), rate: m.rate };
+    const heard = concat(pieces), room = m.end != null ? m.end - m.start : heard.length;
+    if (heard.length && room > 0) state.take = withAudio(hasTake() ? state.take : null, heard.length > room ? heard.subarray(0, room) : heard, m.start, m.rate);
     mixCache = null; rebuildPeaks(state.take.samples);
     saveTake(); dropDraft(); drawWave(); updateUI(); renderSections();
     status('Recovered the interrupted recording.');
@@ -1948,9 +1957,8 @@ function useAttempt(i, k) {
   const have = hasTake() ? state.take.samples : new Float32Array(0);
   const end = a.start + a.samples.length;
   const current = have.slice(a.start, Math.min(end, have.length));
-  const out = new Float32Array(Math.max(have.length, end));
-  out.set(have); out.set(a.samples, a.start);
-  state.take = { samples: out, rate: a.rate };
+  state.take = withAudio(hasTake() ? state.take : null, a.samples, a.start, a.rate);
+  const out = state.take.samples;
   if (hasEnergy(current)) state.attempts[i][k] = { start: a.start, samples: current, rate: a.rate }; else state.attempts[i].splice(k, 1); // nothing is lost: the replaced audio becomes an earlier take
   mixCache = null; rebuildPeaks(out);
   saveTake(); saveAttempts(); drawWave(); renderSections(); updateUI();
@@ -2042,17 +2050,15 @@ $('trim').onclick = () => {
   const n = Math.round(vt(gNow()) * state.take.rate);
   if (n >= state.take.samples.length) { status('Nothing recorded after the playhead.'); return; }
   checkpoint();
-  state.take.samples = state.take.samples.slice(0, n);
-  mixCache = null;
-  rebuildPeaks(state.take.samples);
-  saveTake();
+  const t = n / state.take.rate; // everything after the playhead goes; the recording itself is kept, so the end can be pulled back out
+  setVoiceClips(state.take.vc.filter((c) => c.at < t).map((c) => (c.at + clipLen(c) > t ? { ...c, b: c.a + (t - c.at) } : c)));
   drawWave(); renderSections();
   status(`Trimmed at ${fmt(toEdit(gNow()))}. Press Record to continue from here.`);
   updateUI();
 };
 
 function discardTake() {
-  stopPlay(); state.take = null; vsp = []; asel = null; mixCache = null; peaks = []; capturing = false; state.attempts = {};
+  stopPlay(); state.take = null; asel = null; mixCache = null; peaks = []; capturing = false; state.attempts = {};
   kv.del('take'); kv.del('attempts'); drawWave(); updateUI(); renderSections();
 }
 $('clear').onclick = () => { archiveTake(); checkpoint(); discardTake(); status('Take discarded.'); };
@@ -2103,7 +2109,7 @@ $('takes').onclick = (e) => {
     if (!!t.free !== voiceFree) return status(`${t.name} was recorded with the voice ${t.free ? 'separate from' : 'linked to'} the video. Change "Link voice to video" to match first.`);
     stopPlay(); try { listenSrc?.stop(); } catch {} listening = null;
     checkpoint(); archiveTake();
-    state.take = { samples: t.samples, rate: t.rate }; vsp = []; asel = null; mixCache = null;
+    state.take = takeFrom(t.samples, t.rate); asel = null; mixCache = null;
     rebuildPeaks(t.samples); saveTake(); touched(); drawWave(); renderSections(); renderTakes(); updateUI();
     status(`Now using ${t.name}. The one you had before is kept in the list.`);
   } else if (b.dataset.a === 'del') {
@@ -2240,7 +2246,7 @@ $('audioFile').onchange = async (e) => {
     const mono = new Float32Array(buf.length);
     for (let c = 0; c < buf.numberOfChannels; c++) { const d = buf.getChannelData(c); for (let i = 0; i < mono.length; i++) mono[i] += d[i] / buf.numberOfChannels; }
     stopPlay(); archiveTake(); checkpoint();
-    state.take = { samples: mono, rate: buf.sampleRate }; vsp = []; asel = null; state.attempts = {}; mixCache = null; cleaned = null;
+    state.take = takeFrom(mono, buf.sampleRate); asel = null; state.attempts = {}; mixCache = null; cleaned = null;
     rebuildPeaks(mono); saveTake(); saveAttempts(); touched(); drawWave(); renderSections(); renderTakes(); updateUI();
     status(`Imported ${f.name} (${fmt(buf.duration)}). Move the playhead and press Record to carry on from it. Undo brings back what was there.`);
   } catch { status('Could not read that audio file.'); }
@@ -2372,16 +2378,20 @@ updateUI();
   let usedSaved = false;
   try { // the saved edit counts only if it still fits the videos
     const e = JSON.parse(localStorage.getItem('project') || 'null');
-    if (e && Math.abs(e.total - total()) < 0.05 && Array.isArray(e.clips) && e.clips.every((c) => c.b > c.a && c.a >= 0 && c.b <= total() + 0.01)) { usedSaved = true; ovl = (e.ovl || []).filter((c) => osources[c.o]); clips = e.clips; zooms = (e.zooms || []).filter((z) => z.b > z.a); voiceFree = !!e.voiceFree; vsp = Array.isArray(e.vsp) ? e.vsp : []; syncMode(); }
+    if (e && Math.abs(e.total - total()) < 0.05 && Array.isArray(e.clips) && e.clips.every((c) => c.b > c.a && c.a >= 0 && c.b <= total() + 0.01)) { usedSaved = true; ovl = (e.ovl || []).filter((c) => osources[c.o]); clips = e.clips; zooms = (e.zooms || []).filter((z) => z.b > z.a); voiceFree = !!e.voiceFree; syncMode(); }
   } catch {}
   if (!usedSaved) sources = sources.filter((x) => !x.blank);
   const take = await kv.get('take');
-  if (take?.samples?.length) { state.take = take; rebuildPeaks(take.samples); mixCache = null; }
+  if (take?.samples?.length) {
+    const vc = Array.isArray(take.vc) && take.vc.length ? take.vc : takeFrom(take.samples, take.rate).vc; // saved before clips existed: one clip, the whole recording
+    state.take = { samples: compose(take.samples, vc, take.rate), rate: take.rate, src: take.samples, vc };
+    rebuildPeaks(state.take.samples); mixCache = null;
+  }
   state.attempts = (await kv.get('attempts')) || {};
   const tm = await kv.get('takes');
   if (tm) { takeCounter = tm.n || 0; for (const t of tm.list || []) { const d = await kv.get('take-' + t.id); if (d?.samples) takes.push({ ...t, samples: d.samples }); } }
   // a saved take that is the same recording as the one in use keeps its identity, so it shows as "in use"
-  if (state.take) { const same = takes.find((t) => t.samples.length === state.take.samples.length && t.rate === state.take.rate); if (same) state.take.samples = same.samples; }
+  if (state.take) { const same = takes.find((t) => t.samples.length === state.take.samples.length && t.rate === state.take.rate); if (same) { const whole = state.take.samples === state.take.src; state.take.samples = same.samples; if (whole) state.take.src = same.samples; } }
   await showProject('Welcome back. Your video, script and take were restored.');
   drawWave();
   const savedMusic = await kv.get('music');

@@ -307,3 +307,8 @@ body.app .stage>*:not(.stagebox){flex:none}
 .tbody.razor,.tbody.razor *{cursor:crosshair!important}
 .rline{position:absolute;width:0;border-left:2px solid var(--rec);pointer-events:none;z-index:6}
 .rline::before{content:"✂";position:absolute;top:-1px;left:3px;font-size:12px;color:var(--rec);background:#fffffff0;line-height:1;padding:1px 2px;border-radius:3px}
+
+/* voice pieces can be trimmed from either edge */
+.ablk::before,.ablk::after{content:"";position:absolute;top:0;bottom:0;width:7px;background:#c8601f55;opacity:0;transition:.1s;cursor:col-resize}
+.ablk::before{left:0;border-radius:5px 0 0 5px}.ablk::after{right:0;border-radius:0 5px 5px 0}
+.ablk:hover::before,.ablk:hover::after{opacity:1}
