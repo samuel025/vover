@@ -48,6 +48,12 @@
       <span class="tzoom"><button id="tzOut" class="btn sm icon" title="Zoom the timeline out (-)">−</button><span id="tzLevel" class="sub">Fit</span><button id="tzIn" class="btn sm icon" title="Zoom the timeline in (+). Ctrl + scroll also zooms, double-click a clip to zoom to it">+</button><button id="tzFit" class="btn sm" title="Show the whole timeline (0)">Fit</button></span>
       <span id="takeLen" class="sub"></span><span id="dur">0:00.0</span></div>
     <div class="timeline disabled" id="timeline">
+      <div class="thead" id="thead">
+        <button class="th" data-t="overlay" title="Overlay track: videos on top of the main one">Overlay</button>
+        <button class="th" data-t="video" title="Main video track">Video</button>
+        <button class="th" data-t="voice" title="Your voice recording">Voice</button>
+      </div>
+      <div class="tbody" id="tbody">
       <div class="ostrip" id="ostrip" title="Overlay track: a second video on top of the main one"></div>
       <div class="strip" id="strip"></div>
       <canvas id="wave"></canvas>
@@ -55,29 +61,38 @@
       <div class="marks" id="marks"></div>
       <div class="cuts" id="cuts"></div>
       <div class="playhead" id="playhead"><b></b></div>
+      </div>
     </div>
     <div class="tscroll" id="tscroll" hidden><i></i></div>
 
     <div class="clipbar">
       <button id="undo" class="btn sm" title="Undo (Ctrl+Z)" disabled>↶ Undo</button>
       <button id="redo" class="btn sm" title="Redo (Ctrl+Shift+Z)" disabled>↷ Redo</button>
-      <label class="chk" title="Choose what cuts, splits, deletes and moves change: the video and voice together, just the video, or just the voice (cuts leave silence and the voice can be dragged)">Edits change
-        <select id="editMode"><option value="both">video + voice (linked, closes the gap)</option><option value="video" selected>video and voice separate</option><option value="voice">voice only (keeps the gap)</option></select>
-      </label>
-      <span class="gap"></span>
-      <button id="split" class="btn sm" title="Split the video at the playhead (B)" disabled>Split</button>
-      <button id="delClip" class="btn sm" title="Delete the clip under the playhead (Delete)" disabled>Delete clip</button>
-      <label class="btn sm" for="addFile" title="Add another video to the end of the timeline">+ Add video</label>
-      <input id="addFile" type="file" accept="video/*" hidden />
-      <label class="btn sm" for="ovFile" title="Put another video on top of the main one, at the playhead. It becomes a clip on the overlay track that you can cut, move and trim">+ Overlay video</label>
-      <input id="ovFile" type="file" accept="video/*" hidden />
-      <label class="chk">Clip speed
+      <span class="sep"></span>
+      <span id="selTag" class="seltag" title="The track the buttons act on. Click a clip or a track name to change it"></span>
+      <button id="split" class="btn sm" title="Split at the playhead (B)" disabled>Split</button>
+      <button id="cut" class="btn sm" title="Cut out a part: press at the start, move, press again at the end (X)" disabled>✂ Cut</button>
+      <button id="delClip" class="btn sm" title="Delete the selected clip (Delete)" disabled>Delete</button>
+      <label class="chk">Speed
         <select id="clipSpeed" disabled>
           <option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option>
           <option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option><option value="3">3×</option><option value="4">4×</option>
         </select>
       </label>
+      <span class="gap"></span>
       <small class="sub" id="clipInfo"></small>
+      <label class="chk" title="Tick to tie your voice to the video, so cutting or deleting video also removes the voice under it and closes the gap. Leave it off to edit them separately, like in a video editor"><input id="linkVoice" type="checkbox" /> Link voice to video</label>
+      <details class="addmenu" id="addMenu">
+        <summary class="btn sm primary">+ Add ▾</summary>
+        <div class="menu">
+          <label for="addFile" title="Added after the last clip, or in the empty space at the playhead">Video on the main track</label>
+          <label for="ovFile" title="On the overlay track, at the playhead">Overlay video</label>
+          <label for="audioFile" title="Use a saved recording on this video">Voice recording (audio file)</label>
+          <label for="musicFile" title="Background music that dips while you speak">Background music</label>
+        </div>
+      </details>
+      <input id="addFile" type="file" accept="video/*" hidden />
+      <input id="ovFile" type="file" accept="video/*" hidden />
     </div>
     <div class="cutbar" id="cutbar" hidden></div>
     <div class="transport">
@@ -97,11 +112,9 @@
         <button id="rec" class="btn rec" title="Record / stop (R)" disabled><span class="rdot"></span><span id="recLabel">Record</span></button>
         <button id="pauseRec" class="btn" hidden>Pause</button>
         <button id="redoLine" class="btn" hidden title="Go back to the start of this sentence and read it again (L)">↺ Redo line</button>
-        <button id="cut" class="btn" title="Cut out part of the video: press at the start, move, press again at the end (X)" disabled>✂ Cut</button>
         <button id="trim" class="btn" title="Cut the take at the playhead (T)" disabled>Trim end here</button>
         <button id="clear" class="btn ghost" disabled>Discard take</button>
         <button id="expAudio" class="btn ghost" title="Save your recording as an audio file" disabled>Save audio</button>
-        <label class="btn ghost" for="audioFile" title="Use a saved recording on this video">Import audio</label>
         <input id="audioFile" type="file" accept="audio/*" hidden />
       </div>
     </div>

@@ -262,3 +262,29 @@ body.app .stage>*:not(.stagebox){flex:none}
 .ovtools button{font:600 11px Inter;padding:3px 8px;border:0;border-radius:6px;background:#171717;color:#fff;cursor:pointer}
 .ovtools button:hover{background:#333}
 #shapeW,#shapeH{width:56px;height:30px;border:1px solid var(--border);border-radius:8px;padding:0 6px;font:13px Inter}
+
+/* tracks: names on the left, the lanes beside them */
+.timeline{display:flex;cursor:default;touch-action:auto}
+.tbody{position:relative;flex:1;min-width:0;cursor:ew-resize;touch-action:none;overflow:hidden}
+.thead{flex:none;width:78px;display:flex;flex-direction:column;border-right:1px solid var(--border);background:var(--surface);z-index:2}
+.th{display:flex;align-items:center;gap:6px;height:30px;flex:none;border:0;border-bottom:1px solid var(--border);background:transparent;padding:0 8px;font:600 11px Inter;color:#737373;cursor:pointer;text-align:left}
+.th::before{content:"";width:8px;height:8px;border-radius:50%;background:#f4b6d6;flex:none}
+.th[data-t=video]::before{background:#ffb88e}.th[data-t=voice]::before{background:#f08a4b}
+.th[data-t=voice]{flex:1;height:auto;align-items:flex-start;padding-top:9px;border-bottom:0}
+.th[data-t=voice]::before{margin-top:2px}
+.th:hover{background:var(--hover)}
+.th.sel{color:var(--text);background:var(--hover);box-shadow:inset 3px 0 0 var(--text)}
+.tscroll{margin-left:78px}
+/* one toolbar for the selected track */
+.sep{width:1px;height:20px;background:var(--border);margin:0 4px}
+.seltag{font:700 11px Inter;padding:4px 9px;border-radius:999px;background:#f4b6d6;color:#5a1f43;white-space:nowrap}
+.seltag[data-t=video]{background:#ffb88e;color:#4a2a12}.seltag[data-t=voice]{background:#f5c9a8;color:#6b3410}
+.addmenu{position:relative}
+.addmenu summary{list-style:none;cursor:pointer;user-select:none}
+.addmenu summary::-webkit-details-marker{display:none}
+.addmenu .menu{position:absolute;right:0;bottom:calc(100% + 6px);background:#fff;border:1px solid var(--border);border-radius:12px;box-shadow:0 8px 28px #0002;z-index:30;min-width:230px;padding:5px}
+.addmenu .menu label{display:block;padding:9px 12px;border-radius:8px;cursor:pointer;font:500 13px Inter;color:var(--text)}
+.addmenu .menu label:hover{background:var(--hover)}
+
+.clipbar{gap:6px 8px}
+.clipbar .sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}

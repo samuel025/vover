@@ -4,7 +4,7 @@ import { exportLocally, pickSaveTarget, Unsupported } from './export.js';
 const $ = (id) => document.getElementById(id);
 let video = $('video'), spare = $('video2');
 const scriptEl = $('script'), prompter = $('prompter'), wordsEl = $('words');
-const timeline = $('timeline'), canvas = $('wave');
+const timeline = $('tbody'), canvas = $('wave');
 
 // take.samples holds the voice on the video's own timeline: sample 0 is video time 0.
 const state = { file: null, serverId: null, take: null, recording: false, recPaused: false, playing: false, range: null, attempts: {} };
@@ -13,7 +13,7 @@ let base = new Float32Array(0), chunks = [], chunkLen = 0, capturing = false;
 let spans = [], lastNow = -1, lastSec = -1;
 let speed = 1;
 let capStart = 0, draft = null;
-let cutStart = null, editVer = 0, history = [], future = [], music = null, musicId = 0, takes = [], playK = -1, voiceFree = true, selTrack = 'video', zooms = [], zsel = null, pick = null, zoomDirty = false, vsp = [], asel = null, editVoice = false, osources = [], ovl = [], osel = null;
+let cutStart = null, editVer = 0, history = [], future = [], music = null, musicId = 0, takes = [], playK = -1, voiceFree = true, selTrack = 'video', zooms = [], zsel = null, pick = null, zoomDirty = false, vsp = [], asel = null, osources = [], ovl = [], osel = null;
 let cleaned = null, cleaning = null, finalCache = {}, abCache = null, lastClipKey = '', lastCap = null;
 
 const B = 1024; // samples per waveform bucket
@@ -75,11 +75,16 @@ function updateUI() {
   $('undo').disabled = !idle || !history.length; $('redo').disabled = !idle || !future.length;
   const gone = v && !!total() && editedLen() < 0.05; // every clip was deleted
   for (const k of ['split', 'clipSpeed', 'delClip']) $(k).disabled = !idle || gone;
-  const onOv = voiceFree && selTrack === 'overlay'; $('split').textContent = onOv ? 'Split overlay' : editVoice ? 'Split voice' : 'Split'; $('delClip').textContent = onOv ? 'Delete overlay' : editVoice ? 'Delete voice' : 'Delete clip'; $('clipSpeed').disabled ||= editVoice;
+  const onOv = voiceFree && selTrack === 'overlay', onVo = onVoice(), what = onOv ? 'overlay' : onVo ? 'voice' : 'clip';
+  $('split').textContent = onOv ? 'Split overlay' : onVo ? 'Split voice' : 'Split'; $('delClip').textContent = onOv ? 'Delete overlay' : onVo ? 'Delete voice' : 'Delete';
+  $('selTag').textContent = `${TRACKS[onOv ? 'overlay' : onVo ? 'voice' : 'video']} track`; $('selTag').dataset.t = onOv ? 'overlay' : onVo ? 'voice' : 'video';
+  $('clipSpeed').disabled ||= onOv || onVo;
+  document.querySelectorAll('#thead .th').forEach((el) => el.classList.toggle('sel', el.dataset.t === (onOv ? 'overlay' : onVo ? 'voice' : 'video')));
+  $('linkVoice').checked = !voiceFree;
   wrap.classList.toggle('gone', gone);
   if (gone) for (const k of ['cut', 'rec', 'play', 'toStart', 'back', 'fwd']) $(k).disabled = true;
   $('pauses').disabled = !idle || !hasTake() || voiceFree;
-  $('pauses').title = voiceFree ? 'Switch "Edits change" to video and voice to cut out pauses' : 'Cuts long silences out of the recording and the video';
+  $('pauses').title = voiceFree ? 'Tick "Link voice to video" to cut out pauses' : 'Cuts long silences out of the recording and the video';
   $('zoomAdd').disabled = !idle;
   $('srt').disabled = !v;
   $('cut').textContent = cutStart === null ? '✂ Cut' : '✂ Cut ends here';
@@ -88,7 +93,7 @@ function updateUI() {
   $('export').disabled = rec || !(hasTake() || music) || gone;
   $('hear').disabled = rec;
   secEl.classList.toggle('busy', rec && !state.recPaused);
-  timeline.classList.toggle('disabled', !v);
+  $('timeline').classList.toggle('disabled', !v);
   $('badge').hidden = !rec;
   $('badge').classList.toggle('paused', state.recPaused);
   $('badgeText').textContent = state.recPaused ? 'PAUSED' : 'REC';
@@ -125,6 +130,19 @@ document.addEventListener('drop', (e) => {
 }, true);
 
 
+// ---------- tracks: which one the buttons act on ----------
+// Clicking a clip, a track name, or the empty part of a track selects that track. Split, Cut, Delete and Speed act on it.
+const onVoice = () => voiceFree && selTrack === 'voice';
+const TRACKS = { overlay: 'Overlay', video: 'Video', voice: 'Voice' };
+function setTrack(t, quiet) {
+  if (t === 'voice' && !voiceFree) { if (!quiet) status('The voice is linked to the video. Untick "Link voice to video" to edit it on its own.'); t = 'video'; }
+  selTrack = t;
+  document.querySelectorAll('#thead .th').forEach((el) => el.classList.toggle('sel', el.dataset.t === t));
+  updateUI();
+}
+$('thead').onclick = (e) => { const t = e.target.closest('.th')?.dataset.t; if (t) setTrack(t); };
+const trackAtY = (y) => { const r = $('tbody').getBoundingClientRect(); return y - r.top < 30 ? 'overlay' : y - r.top < 60 ? 'video' : 'voice'; };
+
 // ---------- timeline (playhead + scrub) ----------
 function seekTo(g) {
   if (!canSeek() || !total()) return;
@@ -139,7 +157,7 @@ let scrubbing = false;
 // clicking the timeline takes the keyboard back from a menu or button, so Delete, B and the space bar act on the timeline
 const releaseFocus = () => { const a = document.activeElement; if (a && /SELECT|BUTTON/.test(a.tagName)) a.blur(); };
 timeline.addEventListener('pointerdown', releaseFocus, true);
-timeline.onpointerdown = (e) => { if (!canSeek()) return; scrubbing = true; timeline.setPointerCapture(e.pointerId); scrubAt(e); };
+timeline.onpointerdown = (e) => { if (!canSeek()) return; setTrack(trackAtY(e.clientY), true); scrubbing = true; timeline.setPointerCapture(e.pointerId); scrubAt(e); };
 timeline.onpointermove = (e) => { if (scrubbing) scrubAt(e); };
 timeline.onpointerup = timeline.onpointercancel = () => { scrubbing = false; };
 
@@ -567,22 +585,24 @@ function unbakeVoice() {
   }
   setTakeSamples(out, rate);
 }
-// the selector shows where edits go: video and voice together, only the video, or only the voice
-function syncMode() { if (!voiceFree) editVoice = false; $('editMode').value = !voiceFree ? 'both' : editVoice ? 'voice' : 'video'; }
-$('editMode').onchange = (e) => {
-  const mode = e.target.value, free = mode !== 'both';
+// The voice is either on its own track (the default: deleting or cutting video leaves the voice alone) or linked to the video.
+function syncMode() { $('linkVoice').checked = !voiceFree; }
+// the Add menu closes after a choice, or when you click elsewhere
+$('addMenu').addEventListener('click', (e) => { if (e.target.closest('label')) setTimeout(() => ($('addMenu').open = false), 0); });
+document.addEventListener('pointerdown', (e) => { if (!e.target.closest('#addMenu')) $('addMenu').open = false; });
+$('linkVoice').onchange = (e) => {
+  const free = !e.target.checked;
   e.target.blur();
-  if (!free && ovl.length) { syncMode(); return status('Delete the overlay clips first: linked mode ties everything to the main video, so it cannot hold overlays.'); }
+  if (!free && ovl.length) { syncMode(); return status('Delete the overlay clips first: linking ties everything to the main video, so it cannot hold overlays.'); }
   if (!canSeek()) { syncMode(); return status('Stop recording first.'); }
   if (free !== voiceFree) {
     stopPlay(); archiveTake(); checkpoint();
     if (free) bakeVoice(); else { unbakeVoice(); if (sources.some((x) => x.blank)) { dropGaps(); const n = Math.round(realTotal() * state.take.rate); if (hasTake() && state.take.samples.length > n) setTakeSamples(state.take.samples.slice(0, n), state.take.rate); gSeek(0); } }
     voiceFree = free;
   }
-  editVoice = mode === 'voice'; asel = null;
+  asel = null; if (!voiceFree && selTrack !== 'video') selTrack = 'video';
   saveProject(); touched(); renderCuts(); renderSections(); drawWave(); renderTakes(); updateUI();
-  status(editVoice ? 'Edits now change only the voice. Cut leaves silence, and you can drag the voice pieces on the timeline.'
-    : free ? 'Edits now change only the video. Your voice stays exactly where it is on the timeline.' : 'Edits change the video and the voice together again. Your voice was moved back to match the video.');
+  status(free ? 'Voice and video are separate. Deleting or cutting video leaves your voice where it is.' : 'Voice linked to video. Cutting or deleting video also removes the voice under it. Your voice was moved back to match the video.');
 };
 
 // ---------- editing only the voice ----------
@@ -674,7 +694,7 @@ $('alane').onpointerdown = (e) => {
   if (!el || !canSeek()) return;
   e.stopPropagation();
   const p = pieces()[+el.dataset.i];
-  asel = { s: p.s, e: p.e }; selTrack = 'voice'; updateUI();
+  asel = { s: p.s, e: p.e }; setTrack('voice');
   lane.querySelectorAll('.ablk').forEach((b) => b.classList.toggle('sel', b === el));
   adrag = { p, el, x0: e.clientX, perPx: vr().len / lane.getBoundingClientRect().width, d: 0, moved: false };
   addEventListener('pointermove', amove); addEventListener('pointerup', aup); addEventListener('pointercancel', aup);
@@ -752,7 +772,7 @@ function updateClip() {
   $('strip').querySelector(`[data-i="${k}"]`)?.classList.add('sel');
   const s = segs()[k];
   if (sources[s.src].blank) { $('clipInfo').textContent = `Empty space ${((s.b - s.a) / s.r).toFixed(1)}s · Delete closes it`; return; }
-  $('clipInfo').textContent = `Clip ${k + 1} of ${clips.length} · ${((s.b - s.a) / s.r).toFixed(1)}s · ${editVoice ? 'edits change the voice only' : voiceFree ? 'Delete keeps your voice' : 'Delete removes the voice under it too'}`;
+  $('clipInfo').textContent = `Clip ${k + 1} of ${clips.length} · ${((s.b - s.a) / s.r).toFixed(1)}s${voiceFree ? '' : ' · linked to your voice'}`;
   $('clipSpeed').value = String(s.r);
 }
 
@@ -773,7 +793,7 @@ function cutPress() {
   if (hi - lo < 0.1) return status('Move the playhead away from the start point first.');
   cutStart = null;
   if (voiceFree && selTrack === 'overlay') { renderCuts(); return cutOverlay(lo, hi); }
-  if (editVoice) { renderCuts(); return voiceCut(lo, hi); }
+  if (onVoice()) { renderCuts(); return voiceCut(lo, hi); }
   checkpoint();
   if (voiceFree) cutFree(lo, hi); else for (const [a, b] of spansForEdited(lo, hi)) removeSpan(a, b);
   commitEdit();
@@ -786,7 +806,7 @@ $('cut').onclick = cutPress;
 function splitHere() {
   if (!canSeek()) return;
   if (voiceFree && selTrack === 'overlay') return splitOverlay(toEdit(gNow()));
-  if (editVoice) return voiceSplit(toEdit(gNow()));
+  if (onVoice()) return voiceSplit(toEdit(gNow()));
   const g = gNow(), k = clipIndexAt(g), c = clips[k];
   if (!c || g - c.a < 0.15 || c.b - g < 0.15) return status('Move the playhead into the middle of a clip to split it.');
   checkpoint(); clips.splice(k, 1, { ...c, b: g }, { ...c, a: g }); commitEdit();
@@ -795,7 +815,7 @@ function splitHere() {
 function deleteClip() {
   if (!canSeek()) return;
   if (voiceFree && selTrack === 'overlay') return deleteOverlay();
-  if (editVoice || (voiceFree && selTrack === 'voice')) return voiceDelete(); // the voice piece was the last thing clicked
+  if (onVoice()) return voiceDelete();
   const k = curIdx();
   if (k < 0) return;
   const c = clips[k], at = toEdit(c.a);
@@ -812,7 +832,7 @@ function deleteClip() {
 function setClipSpeed(r) {
   if (!canSeek()) return;
   if (isBlankClip(clips[curIdx()])) return;
-  if (editVoice) { syncMode(); return status('Clip speed changes the video. Switch "Edits change" to video first.'); }
+  if (onVoice() || (voiceFree && selTrack === 'overlay')) return status('Speed changes the video. Click a clip on the Video track first.');
   const k = curIdx();
   if (k < 0) return;
   checkpoint(); clips[k].r = r; commitEdit();
@@ -840,8 +860,8 @@ let sdrag = null;
 const edgeAt = (blk, x) => { const r = blk.getBoundingClientRect(); return r.width < 18 ? null : x - r.left < 7 ? 'l' : r.right - x < 7 ? 'r' : null; };
 strip.onpointerdown = (e) => {
   const blk = e.target.closest('.blk');
-  if (blk) { selTrack = 'video'; updateUI(); if (asel) { asel = null; renderPieces(); } } // Delete now acts on the video clip
-  if (!blk || !canSeek() || editVoice) return; // with voice-only edits the clips just move the playhead
+  if (blk) { setTrack('video'); if (asel) { asel = null; renderPieces(); } } // Delete now acts on the video clip
+  if (!blk || !canSeek()) return;
   e.stopPropagation();
   strip.setPointerCapture(e.pointerId);
   const i = +blk.dataset.i, c = clips[i], W = strip.getBoundingClientRect().width;
@@ -961,17 +981,17 @@ async function addOverlay(file) {
   if (state.recording && !state.recPaused) return status('Stop recording first.');
   stopPlay();
   let switched = false;
-  if (!voiceFree) { $('editMode').value = 'video'; $('editMode').dispatchEvent(new Event('change')); switched = voiceFree; } // overlays need the voice on its own track
-  if (!voiceFree) return status('Overlays need "Edits change" set to "video and voice separate".');
+  if (!voiceFree) { $('linkVoice').checked = false; $('linkVoice').dispatchEvent(new Event('change')); switched = voiceFree; } // overlays need the voice on its own track
+  if (!voiceFree) return status('Overlays need the voice and video unlinked: untick "Link voice to video".');
   try {
     const { dur, url, vw, vh } = await probe(file), s = { id: crypto.randomUUID(), name: file.name, file, url, dur, vw, vh };
     checkpoint();
     osources.push(s);
     olayout([...asItems(), { o: osources.length - 1, a: 0, b: dur, r: 1, at: toEdit(gNow()) }]);
-    osel = { o: osources.length - 1, a: 0 }; selTrack = 'overlay';
+    osel = { o: osources.length - 1, a: 0 }; setTrack('overlay', true);
     kv.set('osrc-' + s.id, { file }); saveOSources();
     commitEdit(); updateUI();
-    status(`${switched ? 'Switched to "video and voice separate", which overlays need. ' : ''}Added ${file.name} on the overlay track at the playhead. Drag it, trim its edges, split it (B) or delete it. Size and corner are in Picture & text.`);
+    status(`${switched ? 'Unlinked the voice from the video, which overlays need. ' : ''}Added ${file.name} on the overlay track at the playhead. Drag it, trim its edges, split it (B) or delete it. Size and corner are in Picture & text.`);
   } catch { status('This browser cannot play that video. Try an MP4 (H.264) or WebM file.'); }
 }
 $('ovFile').onchange = (e) => { addOverlay(e.target.files[0]); e.target.value = ''; };
@@ -1002,7 +1022,7 @@ function cutOverlay(lo, hi) {
 }
 let odrag = null;
 $('ostrip').onpointerdown = (e) => {
-  selTrack = 'overlay';
+  setTrack('overlay');
   const blk = e.target.closest('.blk'), strip = $('ostrip');
   if (!blk || !canSeek()) { updateUI(); return; } // empty space: the timeline just moves the playhead
   e.stopPropagation();
@@ -1104,7 +1124,7 @@ $('ovbox').onpointerdown = (e) => {
   const F = overlayFrame(), b = { ...ovBoxOf(c) }, handle = e.target.closest('[data-h]')?.dataset.h || 'move';
   obox = { c, handle, x0: e.clientX, y0: e.clientY, b, F, moved: false };
   $('ovbox').setPointerCapture(e.pointerId);
-  selTrack = 'overlay'; osel = { o: c.o, a: c.a }; updateUI(); renderCuts();
+  setTrack('overlay'); osel = { o: c.o, a: c.a }; renderCuts();
 };
 $('ovbox').onpointermove = (e) => {
   const d = obox;
@@ -1960,7 +1980,7 @@ $('takes').onclick = (e) => {
     listenSrc.start(); listening = t.id; renderTakes();
   } else if (b.dataset.a === 'use') {
     if (state.recording && !state.recPaused) return status('Stop recording first.');
-    if (!!t.free !== voiceFree) return status(`${t.name} was recorded with edits changing ${t.free ? 'the video only' : 'video and voice'}. Switch "Edits change" to match first.`);
+    if (!!t.free !== voiceFree) return status(`${t.name} was recorded with the voice ${t.free ? 'separate from' : 'linked to'} the video. Change "Link voice to video" to match first.`);
     stopPlay(); try { listenSrc?.stop(); } catch {} listening = null;
     checkpoint(); archiveTake();
     state.take = { samples: t.samples, rate: t.rate }; vsp = []; asel = null; mixCache = null;
